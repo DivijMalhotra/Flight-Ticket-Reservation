@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import paymentRoutes from './routes/payments'
 
 dotenv.config();
 
@@ -42,6 +43,7 @@ async function startServer() {
   app.use('/api/trains', trainRoutes);
   app.use('/api/seats', seatRoutes);
   app.use('/api/bookings', bookingRoutes);
+  app.use('/api/payments', paymentRoutes)
 
   // Health check
   app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

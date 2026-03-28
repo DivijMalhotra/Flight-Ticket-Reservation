@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { Seat, Train } from '../types';
 import { toast } from 'react-toastify';
 import api from '../services/api';
+import { StripeModal } from '../components/StripeModal';
 
 const useQuery = () => new URLSearchParams(useLocation().search);
 
@@ -32,6 +33,8 @@ const BookingPage: React.FC = () => {
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmedPNR, setConfirmedPNR] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(600);
+  const [clientSecret, setClientSecret] = useState('');
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
   // Load train + seats sequentially from API
   useEffect(() => {
@@ -49,9 +52,9 @@ const BookingPage: React.FC = () => {
 
         // 3. Fetch seats dynamically using the exact route indexes
         const seatData = await api.seats.getByTrainAndDate(
-          trainId, 
-          date, 
-          fromStation?.index, 
+          trainId,
+          date,
+          fromStation?.index,
           toStation?.index
         );
         setSeats(seatData.seats);
@@ -113,49 +116,73 @@ const BookingPage: React.FC = () => {
     }
   };
 
-  const handleConfirmBooking = async () => {
-    if (!user) {
-      toast.info('Please login to complete your booking');
-      setIsLoginModalOpen(true);
-      return;
-    }
+  // const handleConfirmBooking = async () => {
+  //   if (!user) {
+  //     toast.info('Please login to complete your booking');
+  //     setIsLoginModalOpen(true);
+  //     return;
+  //   }
+  //   if (!train || selectedSeatIds.length === 0) return;
+
+  //   const fromStation = train.stations.find((s: any) => s.id === fromId || s._id === fromId);
+  //   const toStation = train.stations.find((s: any) => s.id === toId || s._id === toId);
+
+  //   if (!fromStation || !toStation) {
+  //     toast.error('Invalid journey stations. Please go back and search again.');
+  //     return;
+  //   }
+
+  // 1. This runs when they click the button in the sidebar summary
+  const handleInitializePayment = async () => {
+    if (!user) return setIsLoginModalOpen(true);
     if (!train || selectedSeatIds.length === 0) return;
 
-    const fromStation = train.stations.find((s: any) => s.id === fromId || s._id === fromId);
-    const toStation = train.stations.find((s: any) => s.id === toId || s._id === toId);
-
-    if (!fromStation || !toStation) {
-      toast.error('Invalid journey stations. Please go back and search again.');
-      return;
-    }
-
     setIsConfirming(true);
+    try {
+      const { clientSecret } = await api.payments.createIntent(totalPrice);
+      setClientSecret(clientSecret);
+      setIsPaymentModalOpen(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to initialize payment gateway.');
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  // 2. This runs ONLY after Stripe tells us the card was successfully charged
+  const handleFinalizeBooking = async () => {
+    setIsPaymentModalOpen(false); // Close the Stripe modal
+    setIsConfirming(true);        // Show loading spinner on the main page
+
+    const fromStation = train!.stations.find((s: any) => s.id === fromId || s._id === fromId);
+    const toStation = train!.stations.find((s: any) => s.id === toId || s._id === toId);
+
     try {
       const result = await api.bookings.confirm({
         seatIds: selectedSeatIds,
         socketId,
-        trainId: trainId,
-        trainName: train.trainName,
-        trainNumber: train.trainNumber,
+        trainId: trainId!,
+        trainName: train!.trainName,
+        trainNumber: train!.trainNumber,
         journeyDate: date,
-        fromStationId: fromStation.id || fromStation._id,
-        fromStationIndex: fromStation.index,
-        toStationId: toStation.id || toStation._id,
-        toStationIndex: toStation.index,
+        fromStationId: fromStation!.id || fromStation!._id,
+        fromStationIndex: fromStation!.index,
+        toStationId: toStation!.id || toStation!._id,
+        toStationIndex: toStation!.index,
       }) as any;
 
-      // Broadcast BOOKED status to all clients via socket
       socket.emit('broadcast-booked', {
         seatNumbers: result.booking.seatNumbers,
-        trainId: train.id,
+        trainId: train!.id,
         date,
       });
 
       setConfirmedPNR(result.booking.pnr);
       setSelectedSeatIds([]);
       setSelectedSeats([]);
+      toast.success("Payment Successful & Ticket Confirmed!");
     } catch (err: any) {
-      toast.error(err.message || 'Booking failed. Please try again.');
+      toast.error(err.message || 'Payment succeeded, but booking failed. Please contact support.');
     } finally {
       setIsConfirming(false);
     }
@@ -239,9 +266,8 @@ const BookingPage: React.FC = () => {
                 <p className="text-slate-400 text-sm">#{train?.trainNumber} · {date}</p>
               </div>
               {selectedSeatIds.length > 0 && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
-                  timeLeft < 120 ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-300'
-                }`}>
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${timeLeft < 120 ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-300'
+                  }`}>
                   <Clock className="w-4 h-4" />
                   <span className="font-mono font-bold">{formatTime(timeLeft)}</span>
                 </div>
@@ -284,7 +310,7 @@ const BookingPage: React.FC = () => {
                     <span className="text-2xl font-bold text-green-400">₹{totalPrice}</span>
                   </div>
                   <button
-                    onClick={handleConfirmBooking}
+                    onClick={handleInitializePayment}
                     disabled={isConfirming}
                     className="w-full py-3 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
                   >
@@ -311,6 +337,12 @@ const BookingPage: React.FC = () => {
           </div>
         </div>
       </div>
+      <StripeModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        clientSecret={clientSecret}
+        onSuccess={handleFinalizeBooking}
+      />
       <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
     </div>
   );

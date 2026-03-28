@@ -24,7 +24,6 @@ const SearchResults: React.FC = () => {
       setLoading(true);
       setError('');
       try {
-        // Fetch real data from your backend API
         const [searchData, smartData] = await Promise.all([
           api.trains.search(fromId, toId, date),
           api.trains.smartSearch(fromId, toId, date),
@@ -40,7 +39,7 @@ const SearchResults: React.FC = () => {
     if (fromId && toId && date) fetchTrains();
   }, [fromId, toId, date]);
 
-  // Map smart search results by trainId for easy lookup
+
   const smartByTrainId = smartResults.reduce((acc, r) => {
     acc[r.trainId] = r;
     return acc;

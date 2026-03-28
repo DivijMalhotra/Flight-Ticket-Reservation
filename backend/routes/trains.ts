@@ -5,7 +5,7 @@ import Booking from '../models/Booking.js';
 
 const router = Router();
 
-// GET /api/trains/search?from=NDLS&to=BSB&date=2024-12-01
+
 router.get('/search', async (req: Request, res: Response) => {
   const { from, to, date } = req.query as { from: string; to: string; date: string };
 
@@ -13,7 +13,6 @@ router.get('/search', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'from, to, and date are required' });
 
   try {
-    // Find trains that have BOTH stations, with from.index < to.index
     const trains = await Train.find({
       'stations.id': { $all: [from, to] },
     });
@@ -24,7 +23,6 @@ router.get('/search', async (req: Request, res: Response) => {
       return fromStation && toStation && fromStation.index < toStation.index;
     });
 
-    // For each train, fetch available seat count for the date
     const results = await Promise.all(
       validTrains.map(async (train) => {
         const availableCount = await Seat.countDocuments({
@@ -53,8 +51,7 @@ router.get('/search', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/trains/smart-search?from=NDLS&to=BSB&date=2024-12-01
-// Phase 6 — Smart Boarding Recommendation
+
 router.get('/smart-search', async (req: Request, res: Response) => {
   const { from, to, date } = req.query as { from: string; to: string; date: string };
 
@@ -75,9 +72,7 @@ router.get('/smart-search', async (req: Request, res: Response) => {
       const fromStation = train.stations.find((s) => s.id === from)!;
       const toStation = train.stations.find((s) => s.id === to)!;
 
-      // Count seats truly available for the full requested segment
-      // A seat is "blocked" if any confirmed booking overlaps our segment:
-      //   existingFrom.index < toStation.index AND existingTo.index > fromStation.index
+
       const overlappingBookings = await Booking.find({
         trainId: train._id,
         journeyDate: date,
@@ -92,7 +87,6 @@ router.get('/smart-search', async (req: Request, res: Response) => {
       const directlyAvailable = totalSeats - bookedSeatIds.size;
 
       if (directlyAvailable > 0) {
-        // Seats are available, no smart recommendation needed
         suggestions.push({
           trainId: train._id,
           trainName: train.trainName,
@@ -103,8 +97,6 @@ router.get('/smart-search', async (req: Request, res: Response) => {
         continue;
       }
 
-      // No seats on direct route — check intermediate boarding stations
-      // 👇 FIX 1: Sort intermediate stations strictly by their index!
       const intermediateStations = train.stations
         .filter((s) => Number(s.index) > Number(fromStation.index) && Number(s.index) < Number(toStation.index))
         .sort((a, b) => Number(a.index) - Number(b.index)); 
@@ -112,7 +104,6 @@ router.get('/smart-search', async (req: Request, res: Response) => {
       let bestSuggestion = null;
       for (const altStation of intermediateStations) {
         
-        // 👇 FIX 2: Force Number() casting to prevent String comparison bugs
         const altOverlapping = await Booking.find({
           trainId: train._id,
           journeyDate: date,
@@ -130,7 +121,6 @@ router.get('/smart-search', async (req: Request, res: Response) => {
             availableSeats: altAvailable,
             reason: `${altAvailable} seats available if you board from ${altStation.name}`,
           };
-          // Because we sorted the array, breaking here guarantees the EARLIEST possible station!
           break; 
         }
       }
@@ -151,7 +141,7 @@ router.get('/smart-search', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/trains/:id
+
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const train = await Train.findById(req.params.id);

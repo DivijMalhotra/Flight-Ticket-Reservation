@@ -50,6 +50,11 @@ export const api = {
     getById: (id: string) =>
       request<{ train: import('../types').Train }>(`/trains/${id}`),
   },
+  
+  payments: {
+    createIntent: (amount: number) =>
+      request<{ clientSecret: string }>('/payments/create-intent', { method: 'POST', body: JSON.stringify({ amount }) }),
+  },
 
   seats: {
     // 👇 The updated method signature that accepts the station indexes
