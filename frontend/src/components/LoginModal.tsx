@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Mail, User as UserIcon, Lock, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
+import api from '../services/api';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -15,7 +16,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
-  
+
   const { login, signup, refreshUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -38,11 +39,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
 
   const handleGoogleLogin = async () => {
     try {
-      const response = await fetch('/api/auth/google/url');
-      if (!response.ok) {
-        throw new Error('Failed to get auth URL');
-      }
-      const { url } = await response.json();
+      // 👇 Use the api service instead of raw fetch!
+      const { url } = await api.auth.googleUrl();
 
       const width = 500;
       const height = 600;
@@ -112,18 +110,18 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop with Glass Effect */}
-      <div 
+      <div
         className="absolute inset-0 bg-[#0f172a]/60 backdrop-blur-md transition-opacity"
         onClick={onClose}
       ></div>
-      
+
       {/* Modal */}
       <div className="relative w-full max-w-md bg-[#0f172a]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Decorative background blobs */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary-500/20 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
 
-        <button 
+        <button
           onClick={onClose}
           className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-full"
         >
@@ -151,8 +149,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                 <label className="text-xs font-medium text-slate-400 ml-1">Full Name</label>
                 <div className="relative group">
                   <UserIcon className="absolute left-3 top-3.5 w-5 h-5 text-slate-500 group-focus-within:text-primary-400 transition-colors" />
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder-slate-600"
@@ -162,13 +160,13 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                 </div>
               </div>
             )}
-            
+
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-400 ml-1">Email Address</label>
               <div className="relative group">
                 <Mail className="absolute left-3 top-3.5 w-5 h-5 text-slate-500 group-focus-within:text-primary-400 transition-colors" />
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder-slate-600"
@@ -179,10 +177,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
             </div>
 
             <div className="space-y-1">
-               <label className="text-xs font-medium text-slate-400 ml-1">Password</label>
-               <div className="relative group">
+              <label className="text-xs font-medium text-slate-400 ml-1">Password</label>
+              <div className="relative group">
                 <Lock className="absolute left-3 top-3.5 w-5 h-5 text-slate-500 group-focus-within:text-primary-400 transition-colors" />
-                <input 
+                <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -190,15 +188,15 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   placeholder="••••••••"
                   required
                 />
-               </div>
+              </div>
             </div>
 
             {!isLogin && (
               <div className="space-y-1">
-                 <label className="text-xs font-medium text-slate-400 ml-1">Confirm Password</label>
-                 <div className="relative group">
+                <label className="text-xs font-medium text-slate-400 ml-1">Confirm Password</label>
+                <div className="relative group">
                   <Lock className="absolute left-3 top-3.5 w-5 h-5 text-slate-500 group-focus-within:text-primary-400 transition-colors" />
-                  <input 
+                  <input
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
@@ -206,11 +204,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                     placeholder="••••••••"
                     required={!isLogin}
                   />
-                 </div>
+                </div>
               </div>
             )}
 
-            <button 
+            <button
               type="submit"
               disabled={isLoading}
               className="w-full py-3.5 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-primary-900/20 transform transition-all active:scale-95 mt-4 border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -259,11 +257,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
               Google
             </button>
           </form>
-          
+
           <div className="mt-6 text-center">
             <p className="text-sm text-slate-400">
               {isLogin ? "Don't have an account? " : "Already have an account? "}
-              <button 
+              <button
                 onClick={toggleMode}
                 className="text-primary-400 hover:text-primary-300 font-medium hover:underline focus:outline-none transition-colors"
               >
