@@ -1,35 +1,42 @@
 import React from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import SearchResults from './pages/SearchResults';
 import BookingPage from './pages/BookingPage';
-import BookingsPage from './pages/BookingsPage';
-import { SocketProvider } from './context/SocketContext';
-import { AuthProvider } from './context/AuthContext';
-import { ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import ReservationsPage from './pages/ReservationsPage';
+import QueriesPage from './pages/QueriesPage';
+import SignInPage from './pages/SignInPage';
+import SignUpPage from './pages/SignUpPage';
+import DashboardPage from './pages/DashboardPage';
+import PaymentPage from './pages/PaymentPage';
+import BookingConfirmPage from './pages/BookingConfirmPage';
+import NotFoundPage from './pages/NotFoundPage';
 
-const App: React.FC = () => {
-  return (
-    <HashRouter>
-      <SocketProvider>
-        <AuthProvider>
-          <ToastContainer
-            position="bottom-right"
-            autoClose={3000}
-            theme="dark"
-            toastClassName="!bg-slate-800 !text-slate-100 !border !border-slate-700"
-          />
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/trains" element={<SearchResults />} />
-            <Route path="/booking/:trainId" element={<BookingPage />} />
-            <Route path="/bookings" element={<BookingsPage />} />
-          </Routes>
-        </AuthProvider>
-      </SocketProvider>
-    </HashRouter>
-  );
-};
+const App: React.FC = () => (
+  <BrowserRouter>
+    <Routes>
+      <Route element={<Layout />}>
+        {/* Public */}
+        <Route path="/" element={<Home />} />
+        <Route path="/results" element={<SearchResults />} />
+        <Route path="/queries" element={<QueriesPage />} />
+        <Route path="/sign-in/*" element={<SignInPage />} />
+        <Route path="/sign-up/*" element={<SignUpPage />} />
+
+        {/* Protected */}
+        <Route path="/book/:scheduleId" element={<ProtectedRoute><BookingPage /></ProtectedRoute>} />
+        <Route path="/payment/:reservationId" element={<ProtectedRoute><PaymentPage /></ProtectedRoute>} />
+        <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+        <Route path="/reservations" element={<ProtectedRoute><ReservationsPage /></ProtectedRoute>} />
+        <Route path="/booking-confirm" element={<ProtectedRoute><BookingConfirmPage /></ProtectedRoute>} />
+
+        {/* 404 */}
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
+  </BrowserRouter>
+);
 
 export default App;

@@ -1,23 +1,29 @@
 {
-  "name": "railflow-frontend",
+  "name": "skybook-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@stripe/react-stripe-js": "^6.0.0",
-    "@stripe/stripe-js": "^9.0.0",
+    "@clerk/clerk-react": "^5.61.5",
+    "@stripe/react-stripe-js": "^6.2.0",
+    "@stripe/stripe-js": "^9.2.0",
+    "@tanstack/react-query": "^5.99.0",
+    "autoprefixer": "^10.5.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.38.0",
     "lucide-react": "^0.574.0",
+    "postcss": "^8.5.10",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.13.0",
-    "react-toastify": "11.0.3",
-    "socket.io-client": "^4.8.3"
+    "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

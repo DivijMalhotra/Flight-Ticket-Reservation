@@ -1,349 +1,246 @@
-import React, { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import SeatLayout from '../components/SeatLayout';
-import LoginModal from '../components/LoginModal';
-import { Clock, CheckCircle, Loader2, Copy } from 'lucide-react';
-import { useSocket } from '../context/SocketContext';
-import { useAuth } from '../context/AuthContext';
-import { Seat, Train } from '../types';
-import { toast } from 'react-toastify';
-import api from '../services/api';
-import { StripeModal } from '../components/StripeModal';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { api } from '@/services/api';
+import { formatCurrency, formatTime, cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
+import {
+  Ticket, Plane, Users, Armchair, ArrowRight, CheckCircle2,
+} from 'lucide-react';
 
-const useQuery = () => new URLSearchParams(useLocation().search);
+const SEAT_ROWS = 6;
+const SEAT_COLS = ['A', 'B', 'C', 'D'];
 
 const BookingPage: React.FC = () => {
-  const { trainId } = useParams<{ trainId: string }>();
-  const query = useQuery();
-  const fromId = query.get('from') || '';
-  const toId = query.get('to') || '';
-  const date = query.get('date') || new Date().toISOString().split('T')[0];
-
+  const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
-  const { socket, socketId } = useSocket();
-  const { user } = useAuth();
+  const [schedule, setSchedule] = useState<any>(null);
+  const [passengers, setPassengers] = useState<any[]>([]);
+  const [passengerId, setPassengerId] = useState('');
+  const [classType, setClassType] = useState('Economy');
+  const [seatNum, setSeatNum] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const [train, setTrain] = useState<Train | null>(null);
-  const [seats, setSeats] = useState<Seat[]>([]);
-  const [loadingSeats, setLoadingSeats] = useState(true);
-  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
-  const [selectedSeats, setSelectedSeats] = useState<Seat[]>([]);
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [confirmedPNR, setConfirmedPNR] = useState<string | null>(null);
-  const [timeLeft, setTimeLeft] = useState(600);
-  const [clientSecret, setClientSecret] = useState('');
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-
-  // Load train + seats sequentially from API
   useEffect(() => {
-    if (!trainId) return;
-    const load = async () => {
-      setLoadingSeats(true);
-      try {
-        // 1. Fetch train first to get the station array
-        const trainData = await api.trains.getById(trainId);
-        setTrain(trainData.train);
+    Promise.all([
+      api.getPassengers(),
+      api.getSchedule(Number(scheduleId)),
+    ]).then(([p, s]) => {
+      setPassengers(p);
+      setSchedule(s);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [scheduleId]);
 
-        // 2. Safely find the stations using either id or _id
-        const fromStation = trainData.train.stations.find((s: any) => s.id === fromId || s._id === fromId);
-        const toStation = trainData.train.stations.find((s: any) => s.id === toId || s._id === toId);
+  const classMultiplier = classType === 'Business' ? 1.8 : classType === 'First' ? 3 : 1;
+  const price = schedule ? Math.round((schedule.Base_Price || 5000) * classMultiplier) : 0;
 
-        // 3. Fetch seats dynamically using the exact route indexes
-        const seatData = await api.seats.getByTrainAndDate(
-          trainId,
-          date,
-          fromStation?.index,
-          toStation?.index
-        );
-        setSeats(seatData.seats);
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to load booking details');
-      } finally {
-        setLoadingSeats(false);
-      }
-    };
-    load();
-  }, [trainId, date, fromId, toId]);
-
-  // Socket error listener
-  useEffect(() => {
-    socket.on('error', ({ message }: { message: string }) => toast.error(message));
-    socket.on('seat-lock-failed', ({ seatNumber, message }: { seatNumber: string; message: string }) => {
-      toast.warning(`Seat ${seatNumber}: ${message}`);
-    });
-    return () => {
-      socket.off('error');
-      socket.off('seat-lock-failed');
-    };
-  }, [socket]);
-
-  // Countdown timer
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval>;
-    if (selectedSeatIds.length > 0 && timeLeft > 0) {
-      timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
-    } else if (selectedSeatIds.length === 0) {
-      setTimeLeft(600);
-    }
-    return () => clearInterval(timer);
-  }, [selectedSeatIds.length, timeLeft]);
-
-  // Timer expiry
-  useEffect(() => {
-    if (timeLeft === 0 && selectedSeatIds.length > 0) {
-      selectedSeats.forEach((s) => {
-        socket.emit('unlock-seat', { seatId: s.id, seatNumber: s.seatNumber, trainId, date });
-      });
-      setSelectedSeatIds([]);
-      setSelectedSeats([]);
-      toast.warning('Reservation timer expired. Seats released.');
-      setTimeLeft(600);
-    }
-  }, [timeLeft]);
-
-  const handleToggleSeat = (seat: Seat) => {
-    const isSelected = selectedSeatIds.includes(seat.id);
-    if (isSelected) {
-      socket.emit('unlock-seat', { seatId: seat.id, seatNumber: seat.seatNumber, trainId, date });
-      setSelectedSeatIds((prev) => prev.filter((id) => id !== seat.id));
-      setSelectedSeats((prev) => prev.filter((s) => s.id !== seat.id));
-    } else {
-      socket.emit('lock-seat', { seatId: seat.id, seatNumber: seat.seatNumber, trainId, date });
-      setSelectedSeatIds((prev) => [...prev, seat.id]);
-      setSelectedSeats((prev) => [...prev, seat]);
-    }
-  };
-
-  // const handleConfirmBooking = async () => {
-  //   if (!user) {
-  //     toast.info('Please login to complete your booking');
-  //     setIsLoginModalOpen(true);
-  //     return;
-  //   }
-  //   if (!train || selectedSeatIds.length === 0) return;
-
-  //   const fromStation = train.stations.find((s: any) => s.id === fromId || s._id === fromId);
-  //   const toStation = train.stations.find((s: any) => s.id === toId || s._id === toId);
-
-  //   if (!fromStation || !toStation) {
-  //     toast.error('Invalid journey stations. Please go back and search again.');
-  //     return;
-  //   }
-
-  // 1. This runs when they click the button in the sidebar summary
-  const handleInitializePayment = async () => {
-    if (!user) return setIsLoginModalOpen(true);
-    if (!train || selectedSeatIds.length === 0) return;
-
-    setIsConfirming(true);
+  const handleBook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passengerId) { toast.error('Select a passenger'); return; }
+    setSubmitting(true);
     try {
-      const { clientSecret } = await api.payments.createIntent(totalPrice);
-      setClientSecret(clientSecret);
-      setIsPaymentModalOpen(true);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to initialize payment gateway.');
-    } finally {
-      setIsConfirming(false);
-    }
-  };
-
-  // 2. This runs ONLY after Stripe tells us the card was successfully charged
-  const handleFinalizeBooking = async () => {
-    setIsPaymentModalOpen(false); // Close the Stripe modal
-    setIsConfirming(true);        // Show loading spinner on the main page
-
-    const fromStation = train!.stations.find((s: any) => s.id === fromId || s._id === fromId);
-    const toStation = train!.stations.find((s: any) => s.id === toId || s._id === toId);
-
-    try {
-      const result = await api.bookings.confirm({
-        seatIds: selectedSeatIds,
-        socketId,
-        trainId: trainId!,
-        trainName: train!.trainName,
-        trainNumber: train!.trainNumber,
-        journeyDate: date,
-        fromStationId: fromStation!.id || fromStation!._id,
-        fromStationIndex: fromStation!.index,
-        toStationId: toStation!.id || toStation!._id,
-        toStationIndex: toStation!.index,
-      }) as any;
-
-      socket.emit('broadcast-booked', {
-        seatNumbers: result.booking.seatNumbers,
-        trainId: train!.id,
-        date,
+      const data = await api.book({
+        Passenger_ID: Number(passengerId),
+        Schedule_ID: Number(scheduleId),
+        Seat_Num: seatNum || undefined,
+        Class_Type: classType,
       });
-
-      setConfirmedPNR(result.booking.pnr);
-      setSelectedSeatIds([]);
-      setSelectedSeats([]);
-      toast.success("Payment Successful & Ticket Confirmed!");
+      toast.success('Reservation created! Proceed to payment.');
+      navigate(`/payment/${data.reservation.Res_ID}`);
     } catch (err: any) {
-      toast.error(err.message || 'Payment succeeded, but booking failed. Please contact support.');
+      toast.error(err.message);
     } finally {
-      setIsConfirming(false);
+      setSubmitting(false);
     }
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const totalPrice = selectedSeats.reduce((sum, s) => sum + s.price, 0);
-
-  // --- SUCCESS SCREEN ---
-  if (confirmedPNR) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-[#0f172a] flex flex-col">
-        <Navbar />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
-            <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-green-500/40">
-              <CheckCircle className="w-10 h-10 text-white" />
-            </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Booking Confirmed!</h1>
-            <p className="text-slate-300 mb-6">
-              Your seats have been successfully reserved, {user?.name}.
-            </p>
-            <div className="bg-slate-900/50 rounded-xl p-4 mb-6 text-left space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 text-sm">PNR Number</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-white font-mono font-bold text-lg">{confirmedPNR}</span>
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(confirmedPNR); toast.success('PNR copied!'); }}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400 text-sm">Train</span>
-                <span className="text-white text-sm">{train?.trainName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400 text-sm">Journey Date</span>
-                <span className="text-white text-sm">{date}</span>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => navigate('/bookings')}
-                className="flex-1 py-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-medium transition-colors"
-              >
-                View My Bookings
-              </button>
-              <button
-                onClick={() => navigate('/')}
-                className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-medium transition-colors"
-              >
-                Home
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="spinner" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0f172a]">
-      <Navbar />
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
+    <div className="container-app page-section">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-3xl mx-auto"
+      >
+        <h1 className="text-2xl font-bold text-white flex items-center gap-3 mb-2">
+          <Ticket size={24} className="text-brand-500" /> Book Your Flight
+        </h1>
+        <p className="text-sm text-gray-500 mb-8">Schedule #{scheduleId}</p>
 
-          {/* Seat Layout */}
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className="text-2xl font-bold text-white">{train?.trainName}</h1>
-                <p className="text-slate-400 text-sm">#{train?.trainNumber} · {date}</p>
-              </div>
-              {selectedSeatIds.length > 0 && (
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${timeLeft < 120 ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-300'
-                  }`}>
-                  <Clock className="w-4 h-4" />
-                  <span className="font-mono font-bold">{formatTime(timeLeft)}</span>
+        {/* Flight summary card */}
+        {schedule && (
+          <div className="card mb-6 !p-5">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-8">
+                <div>
+                  <p className="text-xs text-gray-500">From</p>
+                  <p className="text-lg font-bold text-white">{schedule.Source || 'Origin'}</p>
+                  <p className="text-xs text-gray-500">{formatTime(schedule.Depart_Time)}</p>
                 </div>
-              )}
-            </div>
-
-            {loadingSeats ? (
-              <div className="flex justify-center items-center py-20">
-                <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+                <div className="flex flex-col items-center gap-1">
+                  <Plane size={16} className="text-brand-500" />
+                  <div className="w-16 h-0.5 bg-brand-500/30 rounded" />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">To</p>
+                  <p className="text-lg font-bold text-white">{schedule.Destination || 'Destination'}</p>
+                  <p className="text-xs text-gray-500">{formatTime(schedule.Arrival_Time)}</p>
+                </div>
               </div>
-            ) : (
-              <SeatLayout
-                seats={seats}
-                selectedSeatIds={selectedSeatIds}
-                socketId={socketId}
-                onToggleSeat={handleToggleSeat}
-              />
-            )}
+              <div className="text-right">
+                <p className="text-xs text-gray-500">Travel Date</p>
+                <p className="text-sm font-semibold text-white">{schedule.Travel_Date}</p>
+                <p className="text-xs text-green-400 mt-1">{schedule.Available_Seats} seats left</p>
+              </div>
+            </div>
           </div>
+        )}
 
-          {/* Booking Summary */}
-          <div className="w-full lg:w-80 flex-shrink-0">
-            <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 sticky top-24">
-              <h2 className="font-bold text-white text-lg mb-4">Booking Summary</h2>
+        <form onSubmit={handleBook} id="booking-form">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
+            {/* Left — Form */}
+            <div className="space-y-6">
+              {/* Passenger */}
+              <div className="card !p-5">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-brand-500" /> Passenger Details
+                </h3>
+                <div className="form-group">
+                  <label>Select Passenger</label>
+                  <select
+                    value={passengerId}
+                    onChange={(e) => setPassengerId(e.target.value)}
+                    className="form-input w-full"
+                    id="passenger-select"
+                    required
+                  >
+                    <option value="">Choose a passenger</option>
+                    {passengers.map(p => (
+                      <option key={p.Passenger_ID} value={p.Passenger_ID}>
+                        {p.Name} (ID: {p.Passenger_ID})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-              {selectedSeats.length === 0 ? (
-                <p className="text-slate-400 text-sm text-center py-8">Select seats from the layout to continue.</p>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    {selectedSeats.map((s) => (
-                      <div key={s.id} className="flex justify-between text-sm">
-                        <span className="text-slate-300 font-mono">{s.seatNumber}</span>
-                        <span className="text-white font-medium">₹{s.price}</span>
+              {/* Class + Seat */}
+              <div className="card !p-5">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                  <Armchair size={16} className="text-brand-500" /> Seat Selection
+                </h3>
+                <div className="grid grid-cols-2 gap-4 mb-5">
+                  <div className="form-group">
+                    <label>Class</label>
+                    <select
+                      value={classType}
+                      onChange={(e) => setClassType(e.target.value)}
+                      className="form-input w-full"
+                      id="class-select"
+                    >
+                      <option value="Economy">Economy</option>
+                      <option value="Business">Business</option>
+                      <option value="First">First Class</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Seat (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 12A"
+                      value={seatNum}
+                      onChange={(e) => setSeatNum(e.target.value)}
+                      className="form-input w-full"
+                      id="seat-input"
+                    />
+                  </div>
+                </div>
+
+                {/* Visual Seat Map */}
+                <div className="bg-surface-primary rounded-xl p-4 border border-white/5">
+                  <p className="text-[0.68rem] text-gray-500 uppercase tracking-wider font-semibold mb-3 text-center">Quick Select</p>
+                  <div className="flex flex-col gap-1.5 items-center">
+                    {Array.from({ length: SEAT_ROWS }, (_, row) => (
+                      <div key={row} className="flex gap-1.5 items-center">
+                        <span className="text-[0.65rem] text-gray-600 w-4 text-right">{row + 1}</span>
+                        {SEAT_COLS.map(col => {
+                          const seat = `${row + 1}${col}`;
+                          const isSelected = seatNum === seat;
+                          return (
+                            <button
+                              key={seat}
+                              type="button"
+                              onClick={() => setSeatNum(seat)}
+                              className={cn(
+                                'w-8 h-7 rounded text-[0.65rem] font-semibold border transition-all cursor-pointer',
+                                isSelected
+                                  ? 'bg-brand-500 border-brand-500 text-white'
+                                  : 'bg-white/5 border-white/10 text-gray-500 hover:border-brand-500/50 hover:text-white'
+                              )}
+                            >
+                              {col}
+                            </button>
+                          );
+                        })}
+                        <span className="w-4" />
                       </div>
                     ))}
                   </div>
-                  <div className="border-t border-slate-700 pt-3 flex justify-between">
-                    <span className="text-slate-300 font-medium">Total</span>
-                    <span className="text-2xl font-bold text-green-400">₹{totalPrice}</span>
-                  </div>
-                  <button
-                    onClick={handleInitializePayment}
-                    disabled={isConfirming}
-                    className="w-full py-3 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                  >
-                    {isConfirming ? <><Loader2 className="w-4 h-4 animate-spin" /> Confirming...</> : 'Confirm Booking'}
-                  </button>
                 </div>
-              )}
+              </div>
+            </div>
 
-              {/* Legend */}
-              <div className="mt-6 pt-4 border-t border-slate-700 space-y-2">
-                {[
-                  { color: 'bg-slate-700', label: 'Available' },
-                  { color: 'bg-primary-600', label: 'Selected by you' },
-                  { color: 'bg-yellow-500/60', label: 'Locked by others' },
-                  { color: 'bg-slate-900', label: 'Booked' },
-                ].map(({ color, label }) => (
-                  <div key={label} className="flex items-center gap-2 text-xs text-slate-400">
-                    <div className={`w-4 h-4 rounded ${color} border border-slate-600`} />
-                    {label}
+            {/* Right — Summary */}
+            <div className="lg:sticky lg:top-20 self-start">
+              <div className="card !p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-white">Booking Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Class</span>
+                    <span className="text-white font-medium">{classType}</span>
                   </div>
-                ))}
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Seat</span>
+                    <span className="text-white font-medium">{seatNum || 'Auto-assign'}</span>
+                  </div>
+                  <div className="border-t border-white/5 pt-3 flex justify-between">
+                    <span className="text-gray-400 font-semibold">Total</span>
+                    <span className="text-xl font-extrabold text-brand-500">
+                      {formatCurrency(price)}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  className="btn btn-primary !rounded-xl"
+                  disabled={submitting}
+                  id="confirm-booking-btn"
+                >
+                  {submitting ? (
+                    <span className="flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Processing...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <ArrowRight size={16} /> Proceed to Payment
+                    </span>
+                  )}
+                </button>
+                <p className="text-[0.68rem] text-gray-600 text-center">You'll pay on the next screen</p>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      <StripeModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        clientSecret={clientSecret}
-        onSuccess={handleFinalizeBooking}
-      />
-      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
+        </form>
+      </motion.div>
     </div>
   );
 };

@@ -1,90 +1,44 @@
-const API_URL = import.meta.env.VITE_API_URL || '';
-const BASE = `${API_URL}/api`;
+import { API_BASE } from '@/lib/utils';
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('auth_token');
-  
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string> || {})
-  };
-
-  // Attach the token to bypass browser cookie blockers!
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    headers,
+async function request(url: string, options?: RequestInit) {
+  const res = await fetch(`${API_BASE}${url}`, {
+    headers: { 'Content-Type': 'application/json' },
     ...options,
   });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data as T;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || 'Request failed');
+  }
+  return res.json();
 }
 
-// Auth
 export const api = {
-  auth: {
-    register: (name: string, email: string, password: string) =>
-      request('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password }) }),
+  getPassengers: () => request('/passengers'),
+  addPassenger: (data: any) => request('/passengers', { method: 'POST', body: JSON.stringify(data) }),
 
-    login: (email: string, password: string) =>
-      request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  searchFlights: (source: string, destination: string, date: string) =>
+    request(`/flights/search?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}&date=${encodeURIComponent(date)}`),
+  getAllFlights: () => request('/flights'),
 
-    me: () => request<{ user: { name: string; email: string; picture?: string } }>('/auth/me'),
+  getSchedules: () => request('/schedules'),
+  getSchedule: (id: number) => request(`/schedules/${id}`),
 
-    logout: () => request('/auth/logout', { method: 'POST' }),
+  getReservations: () => request('/reservations'),
+  getReservation: (id: number) => request(`/reservations/${id}`),
+  book: (data: any) => request('/reservations/book', { method: 'POST', body: JSON.stringify(data) }),
+  cancelReservation: (id: number) => request(`/reservations/${id}/cancel`, { method: 'PUT' }),
 
-    googleUrl: () => request<{ url: string }>('/auth/google/url'),
-  },
+  // Payment
+  createPaymentIntent: (data: any) => request('/payments/create-intent', { method: 'POST', body: JSON.stringify(data) }),
+  confirmPayment: (data: any) => request('/payments/confirm', { method: 'POST', body: JSON.stringify(data) }),
 
-  trains: {
-    search: (from: string, to: string, date: string) =>
-      request<{ trains: import('../types').Train[] }>(`/trains/search?from=${from}&to=${to}&date=${date}`),
-
-    smartSearch: (from: string, to: string, date: string) =>
-      request<{ results: import('../types').TrainSearchResult[] }>(`/trains/smart-search?from=${from}&to=${to}&date=${date}`),
-
-    getById: (id: string) =>
-      request<{ train: import('../types').Train }>(`/trains/${id}`),
-  },
-
-  payments: {
-    createIntent: (amount: number) =>
-      request<{ clientSecret: string }>('/payments/create-intent', { method: 'POST', body: JSON.stringify({ amount }) }),
-  },
-
-  seats: {
-    // 👇 The updated method signature that accepts the station indexes
-    getByTrainAndDate: (trainId: string, date: string, fromIndex?: number, toIndex?: number) =>
-      request<{ seats: import('../types').Seat[]; byCoach: Record<string, import('../types').Seat[]> }>(
-        `/seats?trainId=${trainId}&date=${date}&fromIndex=${fromIndex}&toIndex=${toIndex}`
-      ),
-  },
-
-  bookings: {
-    confirm: (payload: {
-      seatIds: string[];
-      socketId: string;
-      trainId: string;
-      trainName: string;
-      trainNumber: string;
-      journeyDate: string;
-      fromStationId: string;
-      fromStationIndex: number;
-      toStationId: string;
-      toStationIndex: number;
-    }) => request('/bookings/confirm', { method: 'POST', body: JSON.stringify(payload) }),
-
-    getMyBookings: () =>
-      request<{ bookings: import('../types').Booking[] }>('/bookings'),
-
-    cancel: (bookingId: string) =>
-      request('/bookings/cancel', { method: 'POST', body: JSON.stringify({ bookingId }) }),
-  },
+  // Queries
+  passengersToDelhi: () => request('/queries/passengers-to-delhi'),
+  ticketsByDate: (date: string) => request(`/queries/tickets-by-date?date=${date}`),
+  passengersNoReservation: () => request('/queries/passengers-no-reservation'),
+  totalUpiPayments: () => request('/queries/total-upi-payments'),
+  flightsSeatsGt50: () => request('/queries/flights-seats-gt-50'),
+  delayedFlights: () => request('/queries/delayed-flights'),
+  passengerTravelDelhi: () => request('/queries/passenger-travel-delhi'),
+  successfulPayments: () => request('/queries/successful-payments'),
 };
-
-export default api;
