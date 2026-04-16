@@ -71,6 +71,7 @@ const SearchResults: React.FC = () => {
   const source = params.get('source') || '';
   const destination = params.get('destination') || '';
   const date = params.get('date') || '';
+  const travelers = Math.max(1, Number(params.get('travelers') || '1'));
 
   useEffect(() => {
     setLoading(true);
@@ -107,7 +108,7 @@ const SearchResults: React.FC = () => {
       <PageHero
         icon={Search}
         title={`${source || 'Any'} → ${destination || 'Any'}`}
-        subtitle={`${filtered.length} flight(s) found${date ? ` for ${date}` : ''} · Compare prices and book instantly`}
+        subtitle={`${filtered.length} flight(s) found${date ? ` for ${date}` : ''} · ${travelers} traveler(s) · Compare prices and book instantly`}
         badge="Real-time availability"
       />
 
@@ -258,7 +259,7 @@ const SearchResults: React.FC = () => {
                         </div>
                         <button
                           className="btn btn-primary btn-sm mt-2 !w-full"
-                          onClick={() => navigate(`/book/${r.Schedule_ID}`)}
+                          onClick={() => navigate(`/book/${r.Schedule_ID}?travelers=${travelers}`)}
                           disabled={r.Available_Seats <= 0}
                           id={`book-btn-${r.Schedule_ID}`}
                         >

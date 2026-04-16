@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/services/api';
 import { formatCurrency, formatTime, cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import PageHero from '@/components/PageHero';
 import {
-  Ticket, Plane, Users, Armchair, ArrowLeft, ExternalLink,
-  Shield, Clock, CheckCircle2,
+  Ticket, Plane, Users, Armchair, ExternalLink,
+  Shield, Clock, CheckCircle2, Plus, Minus,
 } from 'lucide-react';
 
-const SEAT_ROWS = 5;
+const SEAT_ROWS = 10;
 const SEAT_COLS_LEFT = ['A', 'B', 'C'];
 const SEAT_COLS_RIGHT = ['D', 'E', 'F'];
 
@@ -26,12 +26,20 @@ const fadeUp = {
 
 const BookingPage: React.FC = () => {
   const { scheduleId } = useParams<{ scheduleId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  // Read travelers count from URL — default 1, no upper limit
+  const initialTravelers = Math.max(1, Number(searchParams.get('travelers') || '1'));
+
   const [schedule, setSchedule] = useState<any>(null);
   const [passengers, setPassengers] = useState<any[]>([]);
-  const [passengerId, setPassengerId] = useState('');
+  const [travelerCount, setTravelerCount] = useState(initialTravelers);
+  const [selectedPassengers, setSelectedPassengers] = useState<string[]>(
+    Array(initialTravelers).fill('')
+  );
   const [classType, setClassType] = useState('Economy');
-  const [seatNum, setSeatNum] = useState('');
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -45,33 +53,100 @@ const BookingPage: React.FC = () => {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [scheduleId]);
 
+  // Sync arrays when traveler count changes
+  useEffect(() => {
+    setSelectedPassengers(prev => {
+      const next = [...prev];
+      while (next.length < travelerCount) next.push('');
+      return next.slice(0, travelerCount);
+    });
+    setSelectedSeats(prev => prev.slice(0, travelerCount));
+  }, [travelerCount]);
+
   const classMultiplier = classType === 'Business' ? 1.8 : classType === 'First' ? 3 : 1;
-  const price = schedule ? Math.round((Number(schedule.Base_Price) || 5000) * classMultiplier) : 0;
+  const perTicketPrice = schedule ? Math.round((Number(schedule.Base_Price) || 5000) * classMultiplier) : 0;
+  const totalPrice = perTicketPrice * travelerCount;
+
+  const handleSeatClick = (seat: string) => {
+    if (BOOKED_SEATS.has(seat)) return;
+
+    setSelectedSeats(prev => {
+      if (prev.includes(seat)) {
+        // Deselect
+        return prev.filter(s => s !== seat);
+      }
+      if (prev.length >= travelerCount) {
+        // Replace the oldest selection
+        return [...prev.slice(1), seat];
+      }
+      return [...prev, seat];
+    });
+  };
+
+  const handlePassengerChange = (index: number, value: string) => {
+    setSelectedPassengers(prev => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+
+  const incrementTravelers = () => {
+    const maxSeats = schedule?.Available_Seats || 999;
+    if (travelerCount < maxSeats) {
+      setTravelerCount(prev => prev + 1);
+    }
+  };
+
+  const decrementTravelers = () => {
+    if (travelerCount > 1) {
+      setTravelerCount(prev => prev - 1);
+    }
+  };
 
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!passengerId) { toast.error('Select a passenger'); return; }
-    if (!seatNum) { toast.error('Please select a seat'); return; }
+
+    // Validate: at least one passenger selected
+    const filledPassengers = selectedPassengers.filter(p => p !== '');
+    if (filledPassengers.length === 0) {
+      toast.error('Select at least one passenger');
+      return;
+    }
+
+    // Validate: enough seats selected
+    if (selectedSeats.length < travelerCount) {
+      toast.error(`Please select ${travelerCount} seat(s) — you've selected ${selectedSeats.length}`);
+      return;
+    }
+
+    // Build travelers array
+    const travelers = Array.from({ length: travelerCount }, (_, i) => ({
+      Passenger_ID: Number(selectedPassengers[i] || selectedPassengers[0]),
+      Seat_Num: selectedSeats[i],
+    }));
+
     setSubmitting(true);
     try {
       const data = await api.book({
-        Passenger_ID: Number(passengerId),
         Schedule_ID: Number(scheduleId),
-        Seat_Num: seatNum,
         Class_Type: classType,
+        Travelers: travelers,
       });
 
       // Create Stripe Checkout Session and redirect
+      const seatList = selectedSeats.join(', ');
       const checkoutRes = await api.createCheckoutSession({
         Res_ID: data.reservation.Res_ID,
-        Amount: price,
+        Amount: totalPrice,
         Flight_Info: {
           Source: schedule.Source || 'Origin',
           Destination: schedule.Destination || 'Destination',
           Airline: schedule.Airline_Name || 'Airline',
           Class_Type: classType,
-          Seat_Num: seatNum,
+          Seat_Num: seatList,
           Travel_Date: schedule.Travel_Date,
+          Travelers: travelerCount,
         },
       });
 
@@ -88,17 +163,18 @@ const BookingPage: React.FC = () => {
   };
 
   const renderSeat = (seat: string) => {
-    const isSelected = seatNum === seat;
+    const isSelected = selectedSeats.includes(seat);
     const isBooked = BOOKED_SEATS.has(seat);
+    const seatIndex = selectedSeats.indexOf(seat);
 
     return (
       <button
         key={seat}
         type="button"
         disabled={isBooked}
-        onClick={() => setSeatNum(seat)}
+        onClick={() => handleSeatClick(seat)}
         className={cn(
-          'w-9 h-8 rounded-md text-[0.7rem] font-bold border transition-all',
+          'w-9 h-8 rounded-md text-[0.7rem] font-bold border transition-all relative',
           isBooked
             ? 'bg-red-500/15 border-red-500/20 text-red-400/50 cursor-not-allowed'
             : isSelected
@@ -107,6 +183,11 @@ const BookingPage: React.FC = () => {
         )}
       >
         {seat}
+        {isSelected && travelerCount > 1 && (
+          <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white text-brand-500 text-[0.55rem] font-extrabold flex items-center justify-center border border-brand-500">
+            {seatIndex + 1}
+          </span>
+        )}
       </button>
     );
   };
@@ -143,13 +224,15 @@ const BookingPage: React.FC = () => {
                       {schedule.Source || 'Origin'} → {schedule.Destination || 'Destination'}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {schedule.Airline_Name || 'Airline'} · {classType} · {schedule.Travel_Date} · 1 pax
+                      {schedule.Airline_Name || 'Airline'} · {classType} · {schedule.Travel_Date} · {travelerCount} pax
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xl font-extrabold text-brand-500">{formatCurrency(price)}</p>
-                  <p className="text-[0.65rem] text-gray-500">total</p>
+                  <p className="text-xl font-extrabold text-brand-500">{formatCurrency(totalPrice)}</p>
+                  <p className="text-[0.65rem] text-gray-500">
+                    {travelerCount > 1 ? `${formatCurrency(perTicketPrice)} × ${travelerCount}` : 'total'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -158,30 +241,61 @@ const BookingPage: React.FC = () => {
 
         <form onSubmit={handleBook} id="booking-form">
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
-            {/* ──── Left — Seat Map ──── */}
+            {/* ──── Left — Passenger & Seat Map ──── */}
             <motion.div {...fadeUp} className="space-y-5">
-              {/* Passenger */}
+              {/* Traveler Count + Class */}
               <div className="card !p-5">
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
-                  <Users size={16} className="text-brand-500" /> Passenger Details
+                  <Users size={16} className="text-brand-500" /> Travelers & Class
                 </h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="form-group">
-                    <label>Select Passenger</label>
-                    <select
-                      value={passengerId}
-                      onChange={(e) => setPassengerId(e.target.value)}
-                      className="form-input w-full"
-                      id="passenger-select"
-                      required
-                    >
-                      <option value="">Choose a passenger</option>
-                      {passengers.map(p => (
-                        <option key={p.Passenger_ID} value={p.Passenger_ID}>
-                          {p.Name} (ID: {p.Passenger_ID})
-                        </option>
-                      ))}
-                    </select>
+                    <label>Number of Travelers</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={decrementTravelers}
+                        disabled={travelerCount <= 1}
+                        className={cn(
+                          'w-10 h-10 rounded-lg border flex items-center justify-center transition-all cursor-pointer',
+                          travelerCount <= 1
+                            ? 'border-white/5 text-gray-600 bg-white/[0.02] cursor-not-allowed'
+                            : 'border-border text-white bg-surface-input hover:border-brand-500'
+                        )}
+                      >
+                        <Minus size={16} />
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={travelerCount}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value));
+                          const maxSeats = schedule?.Available_Seats || 999;
+                          setTravelerCount(Math.min(val, maxSeats));
+                        }}
+                        className="form-input w-20 text-center font-bold text-lg"
+                        id="traveler-count-input"
+                      />
+                      <button
+                        type="button"
+                        onClick={incrementTravelers}
+                        disabled={travelerCount >= (schedule?.Available_Seats || 999)}
+                        className={cn(
+                          'w-10 h-10 rounded-lg border flex items-center justify-center transition-all cursor-pointer',
+                          travelerCount >= (schedule?.Available_Seats || 999)
+                            ? 'border-white/5 text-gray-600 bg-white/[0.02] cursor-not-allowed'
+                            : 'border-border text-white bg-surface-input hover:border-brand-500'
+                        )}
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                    {schedule && (
+                      <p className="text-[0.65rem] text-gray-600 mt-1">
+                        {schedule.Available_Seats} seat(s) available
+                      </p>
+                    )}
                   </div>
                   <div className="form-group">
                     <label>Class</label>
@@ -199,6 +313,34 @@ const BookingPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Passenger Details */}
+              <div className="card !p-5">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-brand-500" /> Passenger Details
+                </h3>
+                <div className="space-y-3">
+                  {Array.from({ length: travelerCount }, (_, i) => (
+                    <div key={i} className="form-group">
+                      <label>Traveler {i + 1}{i === 0 ? ' (Primary)' : ''}</label>
+                      <select
+                        value={selectedPassengers[i] || ''}
+                        onChange={(e) => handlePassengerChange(i, e.target.value)}
+                        className="form-input w-full"
+                        id={`passenger-select-${i}`}
+                        required={i === 0}
+                      >
+                        <option value="">Choose a passenger</option>
+                        {passengers.map(p => (
+                          <option key={p.Passenger_ID} value={p.Passenger_ID}>
+                            {p.Name} (ID: {p.Passenger_ID})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Seat Map */}
               <div className="card !p-5">
                 <div className="flex items-center justify-between mb-2">
@@ -210,7 +352,7 @@ const BookingPage: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-gray-400 mb-4">
-                  Select 1 seat — {seatNum ? '1 selected' : '0 selected'}
+                  Select {travelerCount} seat{travelerCount > 1 ? 's' : ''} — {selectedSeats.length} selected
                 </p>
 
                 {/* Legend */}
@@ -270,17 +412,24 @@ const BookingPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Selected seat indicator */}
-                {seatNum && (
+                {/* Selected seat indicators */}
+                {selectedSeats.length > 0 && (
                   <motion.div
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mt-4 flex items-center gap-2 bg-white/5 rounded-lg px-4 py-2.5 border border-white/10"
+                    className="mt-4 flex items-center gap-2 flex-wrap bg-white/5 rounded-lg px-4 py-2.5 border border-white/10"
                   >
                     <span className="text-xs text-gray-400">Your seats:</span>
-                    <span className="bg-brand-500 text-white text-xs font-bold px-2.5 py-1 rounded-md">
-                      {seatNum}
-                    </span>
+                    {selectedSeats.map((seat, i) => (
+                      <span key={seat} className="bg-brand-500 text-white text-xs font-bold px-2.5 py-1 rounded-md">
+                        {travelerCount > 1 ? `T${i + 1}: ` : ''}{seat}
+                      </span>
+                    ))}
+                    {selectedSeats.length < travelerCount && (
+                      <span className="text-xs text-yellow-400">
+                        ({travelerCount - selectedSeats.length} more needed)
+                      </span>
+                    )}
                   </motion.div>
                 )}
 
@@ -302,23 +451,32 @@ const BookingPage: React.FC = () => {
                     ['Date', schedule?.Travel_Date || '—'],
                     ['Time', schedule ? `${formatTime(schedule.Depart_Time)} → ${formatTime(schedule.Arrival_Time)}` : '—'],
                     ['Class', classType],
-                    ['Travelers', '1'],
-                    ['Seats', seatNum || 'None'],
+                    ['Travelers', String(travelerCount)],
+                    ['Seats', selectedSeats.length > 0 ? selectedSeats.join(', ') : 'None'],
                   ].map(([label, value]) => (
                     <div key={label} className="flex justify-between">
                       <span className="text-gray-500">{label}</span>
                       <span className={cn(
                         'font-medium',
-                        label === 'Seats' && seatNum ? 'text-brand-500' : 'text-white'
+                        label === 'Seats' && selectedSeats.length > 0 ? 'text-brand-500' : 'text-white'
                       )}>
                         {value}
                       </span>
                     </div>
                   ))}
+
+                  {/* Price breakdown */}
+                  {travelerCount > 1 && (
+                    <div className="flex justify-between text-xs text-gray-500 border-t border-white/5 pt-2">
+                      <span>Per ticket</span>
+                      <span className="text-white">{formatCurrency(perTicketPrice)} × {travelerCount}</span>
+                    </div>
+                  )}
+
                   <div className="border-t border-white/5 pt-3 flex justify-between">
                     <span className="text-white font-semibold">Total</span>
                     <span className="text-xl font-extrabold text-brand-500">
-                      {formatCurrency(price)}
+                      {formatCurrency(totalPrice)}
                     </span>
                   </div>
                 </div>
@@ -339,7 +497,7 @@ const BookingPage: React.FC = () => {
               <button
                 type="submit"
                 className="btn btn-primary !rounded-xl w-full"
-                disabled={submitting || !seatNum}
+                disabled={submitting || selectedSeats.length < travelerCount}
                 id="confirm-booking-btn"
               >
                 {submitting ? (
@@ -349,7 +507,7 @@ const BookingPage: React.FC = () => {
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
-                    <ExternalLink size={16} /> Pay {formatCurrency(price)}
+                    <ExternalLink size={16} /> Pay {formatCurrency(totalPrice)}
                   </span>
                 )}
               </button>

@@ -15,13 +15,16 @@ router.get('/', async (_req: Request, res: Response) => {
     ORDER BY r.Res_ID DESC
   `);
 
-  // 2. Get all tickets enriched with flight info
+  // 2. Get all tickets enriched with flight info and individual passenger info
   const [tickets] = await pool.query<RowDataPacket[]>(`
     SELECT t.*, f.Flight_Number, f.Airline_Name, f.Source, f.Destination,
-           fs.Depart_Time, fs.Arrival_Time, fs.Travel_Date
+           fs.Depart_Time, fs.Arrival_Time, fs.Travel_Date,
+           p.Name AS Passenger_Name, p.Email AS Passenger_Email, 
+           p.Contact_Number AS Passenger_Contact, p.Passport_Number AS Passenger_Passport
     FROM Ticket t
     JOIN Flight_Schedule fs ON t.Schedule_ID = fs.Schedule_ID
     JOIN Flight f ON fs.Flight_ID = f.Flight_ID
+    JOIN Passenger p ON t.Passenger_ID = p.Passenger_ID
   `);
 
   // 3. Get all payments
@@ -46,6 +49,11 @@ router.get('/', async (_req: Request, res: Response) => {
         Class_Type: t.Class_Type,
         Price: t.Price,
         Ticket_Status: t.Ticket_Status,
+        Passenger_ID: t.Passenger_ID,
+        Passenger_Name: t.Passenger_Name,
+        Passenger_Email: t.Passenger_Email,
+        Passenger_Contact: t.Passenger_Contact,
+        Passenger_Passport: t.Passenger_Passport,
         Flight_Number: t.Flight_Number || '—',
         Airline_Name: t.Airline_Name || '—',
         Source: t.Source || '—',
@@ -81,10 +89,13 @@ router.get('/:id', async (req: Request, res: Response) => {
 
   const [tickets] = await pool.query<RowDataPacket[]>(`
     SELECT t.*, f.Flight_Number, f.Airline_Name, f.Source, f.Destination,
-           fs.Depart_Time, fs.Arrival_Time, fs.Travel_Date
+           fs.Depart_Time, fs.Arrival_Time, fs.Travel_Date,
+           p.Name AS Passenger_Name, p.Email AS Passenger_Email, 
+           p.Contact_Number AS Passenger_Contact, p.Passport_Number AS Passenger_Passport
     FROM Ticket t
     JOIN Flight_Schedule fs ON t.Schedule_ID = fs.Schedule_ID
     JOIN Flight f ON fs.Flight_ID = f.Flight_ID
+    JOIN Passenger p ON t.Passenger_ID = p.Passenger_ID
     WHERE t.Res_ID = ?
   `, [resId]);
 
@@ -95,61 +106,86 @@ router.get('/:id', async (req: Request, res: Response) => {
   res.json({ reservation, tickets, payments });
 });
 
-// ─── POST create reservation + ticket (uses MySQL transaction) ───
+// ─── POST create reservation + ticket(s) (uses MySQL transaction) ───
+// Supports both single-traveler (legacy) and multi-traveler bookings.
+// Multi-traveler: send { Schedule_ID, Class_Type, Travelers: [{ Passenger_ID, Seat_Num }, ...] }
+// Single-traveler (legacy): send { Passenger_ID, Schedule_ID, Seat_Num, Class_Type }
 router.post('/book', async (req: Request, res: Response) => {
   const conn = await pool.getConnection();
   try {
-    const { Passenger_ID, Schedule_ID, Seat_Num, Class_Type } = req.body;
+    const { Schedule_ID, Class_Type, Travelers, Passenger_ID, Seat_Num } = req.body;
+
+    // Normalize into a travelers array
+    const travelerList: { Passenger_ID: number; Seat_Num: string }[] = Travelers && Array.isArray(Travelers) && Travelers.length > 0
+      ? Travelers
+      : [{ Passenger_ID, Seat_Num }];
+
+    const travelerCount = travelerList.length;
 
     await conn.beginTransaction();
 
-    // 1. Check schedule exists & has seats
+    // 1. Check schedule exists & has enough seats
     const [schedRows] = await conn.query<RowDataPacket[]>(
       'SELECT fs.*, f.Base_Price FROM Flight_Schedule fs JOIN Flight f ON fs.Flight_ID = f.Flight_ID WHERE fs.Schedule_ID = ?',
       [Schedule_ID]
     );
     if (schedRows.length === 0) { await conn.rollback(); return res.status(404).json({ error: 'Schedule not found' }); }
     const schedule = schedRows[0];
-    if (schedule.Available_Seats <= 0) { await conn.rollback(); return res.status(400).json({ error: 'No seats available' }); }
+    if (schedule.Available_Seats < travelerCount) {
+      await conn.rollback();
+      return res.status(400).json({ error: `Only ${schedule.Available_Seats} seat(s) available, but ${travelerCount} requested` });
+    }
 
-    // 2. Calculate price
-    let price = schedule.Base_Price;
-    if (Class_Type === 'Business') price = Math.round(price * 1.8);
-    else if (Class_Type === 'First') price = Math.round(price * 3);
+    // 2. Calculate per-ticket price
+    let perTicketPrice = schedule.Base_Price;
+    if (Class_Type === 'Business') perTicketPrice = Math.round(perTicketPrice * 1.8);
+    else if (Class_Type === 'First') perTicketPrice = Math.round(perTicketPrice * 3);
+
+    const totalAmount = perTicketPrice * travelerCount;
 
     // 3. Get next IDs
     const [resMax] = await conn.query<RowDataPacket[]>('SELECT COALESCE(MAX(Res_ID), 2000) + 1 AS nextId FROM Reservation');
     const nextResId = resMax[0].nextId;
 
     const [tickMax] = await conn.query<RowDataPacket[]>('SELECT COALESCE(MAX(Ticket_ID), 3000) + 1 AS nextId FROM Ticket');
-    const nextTicketId = tickMax[0].nextId;
+    let nextTicketId = tickMax[0].nextId;
 
     const today = new Date().toISOString().split('T')[0];
+
+    // Use the first traveler's Passenger_ID as the reservation owner
+    const primaryPassengerId = travelerList[0].Passenger_ID;
 
     // 4. Insert reservation (Pending)
     await conn.query<ResultSetHeader>(
       'INSERT INTO Reservation (Res_ID, Passenger_ID, Res_Date, Res_Status, Total_Amount) VALUES (?, ?, ?, ?, ?)',
-      [nextResId, Passenger_ID, today, 'Pending', price]
+      [nextResId, primaryPassengerId, today, 'Pending', totalAmount]
     );
 
-    // 5. Insert ticket
-    const seatNum = Seat_Num || `${Math.floor(Math.random() * 30) + 1}${['A','B','C','D'][Math.floor(Math.random()*4)]}`;
-    await conn.query<ResultSetHeader>(
-      'INSERT INTO Ticket (Ticket_ID, Res_ID, Schedule_ID, Seat_Num, Class_Type, Price, Ticket_Status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [nextTicketId, nextResId, Schedule_ID, seatNum, Class_Type, price, 'Booked']
-    );
+    // 5. Insert ticket(s) — one per traveler
+    const tickets: any[] = [];
+    for (const traveler of travelerList) {
+      const seatNum = traveler.Seat_Num || `${Math.floor(Math.random() * 30) + 1}${['A','B','C','D'][Math.floor(Math.random()*4)]}`;
+      await conn.query<ResultSetHeader>(
+        'INSERT INTO Ticket (Ticket_ID, Res_ID, Schedule_ID, Seat_Num, Class_Type, Price, Ticket_Status, Passenger_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [nextTicketId, nextResId, Schedule_ID, seatNum, Class_Type, perTicketPrice, 'Booked', traveler.Passenger_ID]
+      );
+      tickets.push({ Ticket_ID: nextTicketId, Res_ID: nextResId, Schedule_ID, Seat_Num: seatNum, Class_Type, Price: perTicketPrice, Ticket_Status: 'Booked', Passenger_ID: traveler.Passenger_ID });
+      nextTicketId++;
+    }
 
-    // 6. Decrease available seats
+    // 6. Decrease available seats by traveler count
     await conn.query<ResultSetHeader>(
-      'UPDATE Flight_Schedule SET Available_Seats = Available_Seats - 1 WHERE Schedule_ID = ?',
-      [Schedule_ID]
+      'UPDATE Flight_Schedule SET Available_Seats = Available_Seats - ? WHERE Schedule_ID = ?',
+      [travelerCount, Schedule_ID]
     );
 
     await conn.commit();
 
     res.status(201).json({
-      reservation: { Res_ID: nextResId, Passenger_ID, Res_Date: today, Res_Status: 'Pending', Total_Amount: price },
-      ticket: { Ticket_ID: nextTicketId, Res_ID: nextResId, Schedule_ID, Seat_Num: seatNum, Class_Type, Price: price, Ticket_Status: 'Booked' },
+      reservation: { Res_ID: nextResId, Passenger_ID: primaryPassengerId, Res_Date: today, Res_Status: 'Pending', Total_Amount: totalAmount },
+      tickets,
+      // Legacy single-ticket field for backward compatibility
+      ticket: tickets[0],
     });
   } catch (err: any) {
     await conn.rollback();

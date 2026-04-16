@@ -42,6 +42,7 @@ const Home: React.FC = () => {
   const [destination, setDestination] = useState('Mumbai');
   const [date, setDate] = useState('');
   const [tripType, setTripType] = useState('oneway');
+  const [travelers, setTravelers] = useState(1);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +50,7 @@ const Home: React.FC = () => {
     if (source) params.set('source', source);
     if (destination) params.set('destination', destination);
     if (date) params.set('date', date);
+    if (travelers > 1) params.set('travelers', String(travelers));
     navigate(`/results?${params.toString()}`);
   };
 
@@ -76,7 +78,7 @@ const Home: React.FC = () => {
             </h1>
             <p className="text-gray-400 text-base md:text-lg max-w-xl mx-auto leading-relaxed">
               Search across all major airlines, compare prices in real-time,
-              and book your flight in seconds — backed by MongoDB.
+              and book your flight in seconds - backed by MySQL Database.
             </p>
           </motion.div>
         </div>
@@ -163,11 +165,16 @@ const Home: React.FC = () => {
               <label>Travelers</label>
               <div className="relative">
                 <Users size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-500 pointer-events-none" />
-                <select defaultValue="1" className="form-input w-full pl-10" id="travelers-select">
-                  <option value="1">1 Traveler</option>
-                  <option value="2">2 Travelers</option>
-                  <option value="3">3 Travelers</option>
-                </select>
+                <input
+                  type="number"
+                  min={1}
+                  value={travelers}
+                  onChange={(e) => setTravelers(e.target.value === '' ? '' as any : Number(e.target.value))}
+                  onBlur={() => setTravelers((prev: any) => Math.max(1, Number(prev) || 1))}
+                  className="form-input w-full pl-10"
+                  id="travelers-input"
+                  placeholder="Number of travelers"
+                />
               </div>
             </div>
           </div>

@@ -53,7 +53,7 @@ router.post('/create-checkout-session', async (req: Request, res: Response) => {
       ? `Flight — ${Flight_Info.Source} → ${Flight_Info.Destination}`
       : `Flight Reservation #${Res_ID}`;
     const flightMeta = Flight_Info
-      ? `${Flight_Info.Airline} · ${Flight_Info.Class_Type} · Seats: ${Flight_Info.Seat_Num} · ${Flight_Info.Travel_Date} · 1 traveler(s)`
+      ? `${Flight_Info.Airline} · ${Flight_Info.Class_Type} · Seats: ${Flight_Info.Seat_Num} · ${Flight_Info.Travel_Date} · ${Flight_Info.Travelers || 1} traveler(s)`
       : '';
 
     const session = await stripe.checkout.sessions.create({

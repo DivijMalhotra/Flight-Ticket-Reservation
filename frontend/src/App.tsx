@@ -6,7 +6,7 @@ import Home from './pages/Home';
 import SearchResults from './pages/SearchResults';
 import BookingPage from './pages/BookingPage';
 import ReservationsPage from './pages/ReservationsPage';
-import QueriesPage from './pages/QueriesPage';
+import DestinationsPage from './pages/DestinationsPage';
 import SignInPage from './pages/SignInPage';
 import SignUpPage from './pages/SignUpPage';
 import DashboardPage from './pages/DashboardPage';
@@ -21,7 +21,7 @@ const App: React.FC = () => (
         {/* Public */}
         <Route path="/" element={<Home />} />
         <Route path="/results" element={<SearchResults />} />
-        <Route path="/queries" element={<QueriesPage />} />
+        <Route path="/destinations" element={<DestinationsPage />} />
         <Route path="/sign-in/*" element={<SignInPage />} />
         <Route path="/sign-up/*" element={<SignUpPage />} />
 

@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth, UserButton } from '@clerk/clerk-react';
-import { Plane, ClipboardList, Database, LayoutDashboard, Menu, X } from 'lucide-react';
+import { Plane, ClipboardList, MapPin, LayoutDashboard, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const NAV_LINKS = [
   { to: '/', label: 'Flights', icon: Plane },
+  { to: '/destinations', label: 'Destinations', icon: MapPin },
   { to: '/reservations', label: 'Reservations', icon: ClipboardList },
-  { to: '/queries', label: 'Queries', icon: Database },
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
 ];
 

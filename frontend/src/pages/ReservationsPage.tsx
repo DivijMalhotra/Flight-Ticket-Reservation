@@ -22,7 +22,8 @@ interface EnrichedReservation {
   Res_ID: number; Res_Date: string; Res_Status: string; Total_Amount: number;
   Passenger_ID: number; Passenger_Name: string; Passenger_Email: string;
   Passenger_Contact: string; Passenger_Passport: string;
-  tickets: TicketDetail[]; payments: PaymentDetail[];
+  tickets: (TicketDetail & { Passenger_Name?: string; Passenger_Email?: string; Passenger_Contact?: string; Passenger_Passport?: string })[];
+  payments: PaymentDetail[];
 }
 
 const statusBadge = (s: string) => {
@@ -137,32 +138,12 @@ const ReservationsPage: React.FC = () => {
                           className="overflow-hidden"
                         >
                           <div className="border-t border-white/5 px-5 py-5 bg-white/[0.01]">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {/* Passenger */}
-                              <div className="bg-surface-input rounded-xl p-4 border border-white/5">
-                                <h4 className="text-[0.7rem] font-bold text-brand-500 uppercase tracking-wider mb-3 flex items-center gap-2 pb-2 border-b border-brand-500/10">
-                                  <User size={13} /> Passenger
-                                </h4>
-                                <div className="space-y-2 text-sm">
-                                  {[
-                                    ['Name', r.Passenger_Name],
-                                    ['Email', r.Passenger_Email, Mail],
-                                    ['Phone', r.Passenger_Contact, Phone],
-                                    ['Passport', r.Passenger_Passport, Hash],
-                                  ].map(([label, value, Icon]: any, i) => (
-                                    <div key={i} className="flex justify-between">
-                                      <span className="text-gray-500 flex items-center gap-1">{Icon && <Icon size={11} />}{label}</span>
-                                      <span className="text-white">{value}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* Flight */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                              {/* Flight (Common for all tickets in reservation) */}
                               {ticket && (
                                 <div className="bg-surface-input rounded-xl p-4 border border-white/5">
                                   <h4 className="text-[0.7rem] font-bold text-brand-500 uppercase tracking-wider mb-3 flex items-center gap-2 pb-2 border-b border-brand-500/10">
-                                    <Plane size={13} /> Flight
+                                    <Plane size={13} /> Flight Info
                                   </h4>
                                   <div className="space-y-2 text-sm">
                                     <div className="flex justify-between"><span className="text-gray-500">Flight</span><span className="text-white">{ticket.Flight_Number} · {ticket.Airline_Name}</span></div>
@@ -173,27 +154,11 @@ const ReservationsPage: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* Ticket */}
-                              {ticket && (
+                              {/* Payment (Common for reservation) */}
+                              {payment ? (
                                 <div className="bg-surface-input rounded-xl p-4 border border-white/5">
                                   <h4 className="text-[0.7rem] font-bold text-brand-500 uppercase tracking-wider mb-3 flex items-center gap-2 pb-2 border-b border-brand-500/10">
-                                    <Tag size={13} /> Ticket
-                                  </h4>
-                                  <div className="space-y-2 text-sm">
-                                    <div className="flex justify-between"><span className="text-gray-500">ID</span><span className="text-white">#{ticket.Ticket_ID}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1"><Armchair size={11} />Seat</span><span className="text-white">{ticket.Seat_Num}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Class</span><span className="text-white">{ticket.Class_Type}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Price</span><span className="text-brand-500 font-bold">{formatCurrency(Number(ticket.Price))}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(ticket.Ticket_Status)}</div>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Payment */}
-                              {payment && (
-                                <div className="bg-surface-input rounded-xl p-4 border border-white/5">
-                                  <h4 className="text-[0.7rem] font-bold text-brand-500 uppercase tracking-wider mb-3 flex items-center gap-2 pb-2 border-b border-brand-500/10">
-                                    <CreditCard size={13} /> Payment
+                                    <CreditCard size={13} /> Payment Info
                                   </h4>
                                   <div className="space-y-2 text-sm">
                                     <div className="flex justify-between"><span className="text-gray-500">Pay ID</span><span className="text-white">#{payment.Pay_ID}</span></div>
@@ -203,7 +168,40 @@ const ReservationsPage: React.FC = () => {
                                     <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(payment.Pay_Status)}</div>
                                   </div>
                                 </div>
+                              ) : (
+                                <div className="bg-surface-input rounded-xl p-4 border border-white/5 flex items-center justify-center opacity-50">
+                                  <span className="text-xs text-gray-400">No payment info found</span>
+                                </div>
                               )}
+                            </div>
+
+                            {/* Travelers Loop */}
+                            <h4 className="text-[0.75rem] font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2 mt-2">
+                              <User size={14} className="text-brand-500" /> Travelers ({r.tickets.length})
+                            </h4>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                              {r.tickets.map((t, idx) => (
+                                <div key={t.Ticket_ID} className="bg-surface-input rounded-xl p-4 border border-white/5 flex flex-col md:flex-row gap-4">
+                                  {/* Left side: Passenger */}
+                                  <div className="flex-1 space-y-2 text-sm md:border-r border-white/5 pr-4">
+                                    <div className="font-semibold text-white text-base mb-1">
+                                      Traveler {idx + 1}: {t.Passenger_Name || r.Passenger_Name}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-gray-400"><Mail size={12} /> <span className="truncate">{t.Passenger_Email || r.Passenger_Email}</span></div>
+                                    <div className="flex items-center gap-2 text-gray-400"><Phone size={12} /> <span>{t.Passenger_Contact || r.Passenger_Contact}</span></div>
+                                    <div className="flex items-center gap-2 text-gray-400"><Hash size={12} /> <span>{t.Passenger_Passport || r.Passenger_Passport}</span></div>
+                                  </div>
+                                  
+                                  {/* Right side: Ticket */}
+                                  <div className="flex-1 space-y-2 text-sm">
+                                    <div className="flex justify-between"><span className="text-gray-500">Ticket ID</span><span className="text-white">#{t.Ticket_ID}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500 flex items-center gap-1"><Armchair size={11} />Seat</span><span className="text-brand-500 font-bold">{t.Seat_Num}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Class</span><span className="text-white">{t.Class_Type}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Price</span><span className="text-white">{formatCurrency(Number(t.Price))}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Status</span>{statusBadge(t.Ticket_Status)}</div>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
 
                             {/* Cancel */}
