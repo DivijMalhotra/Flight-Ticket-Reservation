@@ -1,64 +1,69 @@
 import { Router, Request, Response } from 'express';
-import Flight from '../models/Flight.js';
-import FlightSchedule from '../models/FlightSchedule.js';
+import { pool } from '../config/db.js';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 const router = Router();
 
 // GET all flights
 router.get('/', async (_req: Request, res: Response) => {
-  const flights = await Flight.find().sort({ Flight_ID: 1 });
-  res.json(flights);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM Flight ORDER BY Flight_ID ASC'
+  );
+  res.json(rows);
 });
 
 // GET search flights by source, destination, date
 router.get('/search', async (req: Request, res: Response) => {
   const { source, destination, date } = req.query;
-  const query: any = {};
-  if (source) query.Source = { $regex: new RegExp(source as string, 'i') };
-  if (destination) query.Destination = { $regex: new RegExp(destination as string, 'i') };
 
-  const flights = await Flight.find(query);
-  const flightIds = flights.map(f => f.Flight_ID);
+  let sql = `
+    SELECT fs.Schedule_ID, fs.Flight_ID, f.Flight_Number, f.Airline_Name,
+           f.Source, f.Destination, fs.Depart_Time, fs.Arrival_Time,
+           fs.Travel_Date, fs.Available_Seats, fs.Delay_Minutes, f.Base_Price
+    FROM Flight_Schedule fs
+    JOIN Flight f ON fs.Flight_ID = f.Flight_ID
+    WHERE 1=1
+  `;
+  const params: any[] = [];
 
-  const schedQuery: any = { Flight_ID: { $in: flightIds } };
-  if (date) schedQuery.Travel_Date = date;
+  if (source) {
+    sql += ' AND f.Source LIKE ?';
+    params.push(`%${source}%`);
+  }
+  if (destination) {
+    sql += ' AND f.Destination LIKE ?';
+    params.push(`%${destination}%`);
+  }
+  if (date) {
+    sql += ' AND fs.Travel_Date = ?';
+    params.push(date);
+  }
 
-  const schedules = await FlightSchedule.find(schedQuery);
+  sql += ' ORDER BY fs.Depart_Time ASC';
 
-  // Merge flight info into schedule results
-  const results = schedules.map(s => {
-    const flight = flights.find(f => f.Flight_ID === s.Flight_ID);
-    return {
-      Schedule_ID: s.Schedule_ID,
-      Flight_ID: s.Flight_ID,
-      Flight_Number: flight?.Flight_Number,
-      Airline_Name: flight?.Airline_Name,
-      Source: flight?.Source,
-      Destination: flight?.Destination,
-      Depart_Time: s.Depart_Time,
-      Arrival_Time: s.Arrival_Time,
-      Travel_Date: s.Travel_Date,
-      Available_Seats: s.Available_Seats,
-      Delay_Minutes: s.Delay_Minutes,
-      Base_Price: flight?.Base_Price,
-    };
-  });
-
-  res.json(results);
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
+  res.json(rows);
 });
 
 // GET single flight
 router.get('/:id', async (req: Request, res: Response) => {
-  const f = await Flight.findOne({ Flight_ID: Number(req.params.id) });
-  if (!f) return res.status(404).json({ error: 'Flight not found' });
-  res.json(f);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM Flight WHERE Flight_ID = ?',
+    [Number(req.params.id)]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Flight not found' });
+  res.json(rows[0]);
 });
 
 // POST add flight
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const flight = await Flight.create(req.body);
-    res.status(201).json(flight);
+    const { Flight_ID, Flight_Number, Airline_Name, Source, Destination, Base_Price } = req.body;
+    await pool.query<ResultSetHeader>(
+      'INSERT INTO Flight (Flight_ID, Flight_Number, Airline_Name, Source, Destination, Base_Price) VALUES (?, ?, ?, ?, ?, ?)',
+      [Flight_ID, Flight_Number, Airline_Name, Source, Destination, Base_Price]
+    );
+    res.status(201).json({ Flight_ID, Flight_Number, Airline_Name, Source, Destination, Base_Price });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

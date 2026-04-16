@@ -34,10 +34,11 @@ async function startServer() {
   app.use('/api/payments', paymentRoutes);
 
   // Health check
-  app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+  app.get('/api/health', (_, res) => res.json({ status: 'ok', db: 'mysql', timestamp: new Date().toISOString() }));
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✈️  SkyFlow Backend running on http://localhost:${PORT}`);
+    console.log(`   Database: MySQL (${process.env.MYSQL_DATABASE})`);
     console.log(`   Client URL: ${CLIENT_URL}`);
   });
 }

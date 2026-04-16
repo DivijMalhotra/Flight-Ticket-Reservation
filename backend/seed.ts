@@ -1,149 +1,262 @@
 /**
  * Run with: npm run seed
- * Seeds MongoDB with Flight Reservation System data.
- * 8-10 realistic records per table with referential integrity.
+ * Creates the flight_reservation database, all tables, and inserts sample data.
+ * Uses mysql2 — completely replaces the old MongoDB seed.
  */
 import dotenv from 'dotenv';
 dotenv.config();
 
-import mongoose from 'mongoose';
-import { connectDB } from './config/db.js';
-import Passenger from './models/Passenger.js';
-import Flight from './models/Flight.js';
-import FlightSchedule from './models/FlightSchedule.js';
-import Reservation from './models/Reservation.js';
-import Ticket from './models/Ticket.js';
-import Payment from './models/Payment.js';
+import mysql from 'mysql2/promise';
 
 async function seed() {
-  await connectDB();
+  // ── 1. Connect WITHOUT a database to create it if needed ──
+  const initConn = await mysql.createConnection({
+    host: process.env.MYSQL_HOST || 'localhost',
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || '',
+    port: Number(process.env.MYSQL_PORT) || 3306,
+  });
 
-  console.log('🧹 Clearing existing data...');
-  await Payment.deleteMany({});
-  await Ticket.deleteMany({});
-  await Reservation.deleteMany({});
-  await FlightSchedule.deleteMany({});
-  await Flight.deleteMany({});
-  await Passenger.deleteMany({});
+  const dbName = process.env.MYSQL_DATABASE || 'flight_reservation';
+  console.log(`🗄️  Creating database "${dbName}" if not exists...`);
+  await initConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+  await initConn.query(`USE \`${dbName}\``);
 
-  // ── PASSENGERS (10) ──
-  const passengers = [
-    { Passenger_ID: 1, Name: 'Aarav Sharma', DOB: '1990-05-14', Gender: 'Male', Passport_Number: 'A1234567', Email: 'aarav@email.com', Contact_Number: '9876543210' },
-    { Passenger_ID: 2, Name: 'Priya Singh', DOB: '1985-11-22', Gender: 'Female', Passport_Number: 'B2345678', Email: 'priya@email.com', Contact_Number: '9876543211' },
-    { Passenger_ID: 3, Name: 'Rohan Patel', DOB: '1992-03-08', Gender: 'Male', Passport_Number: 'C3456789', Email: 'rohan@email.com', Contact_Number: '9876543212' },
-    { Passenger_ID: 4, Name: 'Sneha Gupta', DOB: '1998-07-30', Gender: 'Female', Passport_Number: 'D4567890', Email: 'sneha@email.com', Contact_Number: '9876543213' },
-    { Passenger_ID: 5, Name: 'Vikram Reddy', DOB: '1988-01-15', Gender: 'Male', Passport_Number: 'E5678901', Email: 'vikram@email.com', Contact_Number: '9876543214' },
-    { Passenger_ID: 6, Name: 'Ananya Iyer', DOB: '1995-09-25', Gender: 'Female', Passport_Number: 'F6789012', Email: 'ananya@email.com', Contact_Number: '9876543215' },
-    { Passenger_ID: 7, Name: 'Karan Mehta', DOB: '1991-12-02', Gender: 'Male', Passport_Number: 'G7890123', Email: 'karan@email.com', Contact_Number: '9876543216' },
-    { Passenger_ID: 8, Name: 'Divya Nair', DOB: '1993-06-18', Gender: 'Female', Passport_Number: 'H8901234', Email: 'divya@email.com', Contact_Number: '9876543217' },
-    { Passenger_ID: 9, Name: 'Arjun Verma', DOB: '1987-04-11', Gender: 'Male', Passport_Number: 'I9012345', Email: 'arjun@email.com', Contact_Number: '9876543218' },
-    { Passenger_ID: 10, Name: 'Meera Joshi', DOB: '1996-08-05', Gender: 'Female', Passport_Number: 'J0123456', Email: 'meera@email.com', Contact_Number: '9876543219' },
-  ];
+  // ── 2. Drop tables in reverse dependency order ──
+  console.log('🧹 Dropping existing tables...');
+  await initConn.query('SET FOREIGN_KEY_CHECKS = 0');
+  await initConn.query('DROP TABLE IF EXISTS Payment');
+  await initConn.query('DROP TABLE IF EXISTS Ticket');
+  await initConn.query('DROP TABLE IF EXISTS Reservation');
+  await initConn.query('DROP TABLE IF EXISTS Flight_Schedule');
+  await initConn.query('DROP TABLE IF EXISTS Flight');
+  await initConn.query('DROP TABLE IF EXISTS Passenger');
+  await initConn.query('SET FOREIGN_KEY_CHECKS = 1');
+
+  // ── 3. Create tables ──
+  console.log('📐 Creating tables...');
+
+  await initConn.query(`
+    CREATE TABLE Passenger (
+      Passenger_ID    INT             PRIMARY KEY,
+      Name            VARCHAR(100)    NOT NULL,
+      DOB             DATE            NOT NULL,
+      Gender          VARCHAR(10)     NOT NULL CHECK (Gender IN ('Male', 'Female', 'Other')),
+      Passport_Number VARCHAR(20)     NOT NULL UNIQUE,
+      Email           VARCHAR(100)    NOT NULL UNIQUE,
+      Contact_Number  VARCHAR(15)     NOT NULL
+    )
+  `);
+
+  await initConn.query(`
+    CREATE TABLE Flight (
+      Flight_ID       INT             PRIMARY KEY,
+      Flight_Number   VARCHAR(10)     NOT NULL UNIQUE,
+      Airline_Name    VARCHAR(50)     NOT NULL,
+      Source          VARCHAR(50)     NOT NULL,
+      Destination     VARCHAR(50)     NOT NULL,
+      Base_Price      DECIMAL(10,2)   NOT NULL CHECK (Base_Price > 0)
+    )
+  `);
+
+  await initConn.query(`
+    CREATE TABLE Flight_Schedule (
+      Schedule_ID     INT             PRIMARY KEY,
+      Flight_ID       INT             NOT NULL,
+      Depart_Time     TIME            NOT NULL,
+      Arrival_Time    TIME            NOT NULL,
+      Travel_Date     DATE            NOT NULL,
+      Available_Seats INT             NOT NULL CHECK (Available_Seats >= 0),
+      Delay_Minutes   INT             DEFAULT 0,
+      FOREIGN KEY (Flight_ID) REFERENCES Flight(Flight_ID)
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
+
+  await initConn.query(`
+    CREATE TABLE Reservation (
+      Res_ID          INT             PRIMARY KEY,
+      Passenger_ID    INT             NOT NULL,
+      Res_Date        DATE            NOT NULL,
+      Res_Status      VARCHAR(20)     NOT NULL CHECK (Res_Status IN ('Confirmed', 'Cancelled', 'Pending')),
+      Total_Amount    DECIMAL(10,2)   NOT NULL,
+      FOREIGN KEY (Passenger_ID) REFERENCES Passenger(Passenger_ID)
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
+
+  await initConn.query(`
+    CREATE TABLE Ticket (
+      Ticket_ID       INT             PRIMARY KEY,
+      Res_ID          INT             NOT NULL,
+      Schedule_ID     INT             NOT NULL,
+      Seat_Num        VARCHAR(10)     NOT NULL,
+      Class_Type      VARCHAR(20)     NOT NULL CHECK (Class_Type IN ('Economy', 'Business', 'First')),
+      Price           DECIMAL(10,2)   NOT NULL,
+      Ticket_Status   VARCHAR(20)     NOT NULL CHECK (Ticket_Status IN ('Booked', 'Cancelled')),
+      FOREIGN KEY (Res_ID) REFERENCES Reservation(Res_ID)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+      FOREIGN KEY (Schedule_ID) REFERENCES Flight_Schedule(Schedule_ID)
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
+
+  await initConn.query(`
+    CREATE TABLE Payment (
+      Pay_ID          INT             PRIMARY KEY,
+      Res_ID          INT             NOT NULL,
+      Amount          DECIMAL(10,2)   NOT NULL,
+      Pay_Date        DATE            NOT NULL,
+      Pay_Mode        VARCHAR(20)     NOT NULL CHECK (Pay_Mode IN ('UPI', 'Credit Card', 'Debit Card', 'Net Banking')),
+      Pay_Status      VARCHAR(20)     NOT NULL CHECK (Pay_Status IN ('Success', 'Failed', 'Pending')),
+      FOREIGN KEY (Res_ID) REFERENCES Reservation(Res_ID)
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
+
+  console.log('✅ All 6 tables created successfully.');
+
+  // ── 4. Insert Passengers (10) ──
   console.log('👤 Inserting passengers...');
-  await Passenger.insertMany(passengers);
-
-  // ── FLIGHTS (10) ──
-  const flights = [
-    { Flight_ID: 101, Flight_Number: 'AI-101', Airline_Name: 'Air India', Source: 'Delhi', Destination: 'Mumbai', Base_Price: 5500 },
-    { Flight_ID: 102, Flight_Number: 'SG-202', Airline_Name: 'SpiceJet', Source: 'Mumbai', Destination: 'Bangalore', Base_Price: 4200 },
-    { Flight_ID: 103, Flight_Number: '6E-303', Airline_Name: 'IndiGo', Source: 'Delhi', Destination: 'Chennai', Base_Price: 6000 },
-    { Flight_ID: 104, Flight_Number: 'UK-404', Airline_Name: 'Vistara', Source: 'Kolkata', Destination: 'Delhi', Base_Price: 5800 },
-    { Flight_ID: 105, Flight_Number: 'AI-505', Airline_Name: 'Air India', Source: 'Bangalore', Destination: 'Delhi', Base_Price: 6500 },
-    { Flight_ID: 106, Flight_Number: 'SG-606', Airline_Name: 'SpiceJet', Source: 'Chennai', Destination: 'Hyderabad', Base_Price: 3800 },
-    { Flight_ID: 107, Flight_Number: '6E-707', Airline_Name: 'IndiGo', Source: 'Hyderabad', Destination: 'Mumbai', Base_Price: 4500 },
-    { Flight_ID: 108, Flight_Number: 'UK-808', Airline_Name: 'Vistara', Source: 'Delhi', Destination: 'Kolkata', Base_Price: 5200 },
-    { Flight_ID: 109, Flight_Number: 'G8-909', Airline_Name: 'GoAir', Source: 'Pune', Destination: 'Delhi', Base_Price: 4800 },
-    { Flight_ID: 110, Flight_Number: 'AI-110', Airline_Name: 'Air India', Source: 'Mumbai', Destination: 'Delhi', Base_Price: 5600 },
+  const passengers = [
+    [1, 'Aarav Sharma', '1990-05-14', 'Male', 'A1234567', 'aarav@email.com', '9876543210'],
+    [2, 'Priya Singh', '1985-11-22', 'Female', 'B2345678', 'priya@email.com', '9876543211'],
+    [3, 'Rohan Patel', '1992-03-08', 'Male', 'C3456789', 'rohan@email.com', '9876543212'],
+    [4, 'Sneha Gupta', '1998-07-30', 'Female', 'D4567890', 'sneha@email.com', '9876543213'],
+    [5, 'Vikram Reddy', '1988-01-15', 'Male', 'E5678901', 'vikram@email.com', '9876543214'],
+    [6, 'Ananya Iyer', '1995-09-25', 'Female', 'F6789012', 'ananya@email.com', '9876543215'],
+    [7, 'Karan Mehta', '1991-12-02', 'Male', 'G7890123', 'karan@email.com', '9876543216'],
+    [8, 'Divya Nair', '1993-06-18', 'Female', 'H8901234', 'divya@email.com', '9876543217'],
+    [9, 'Arjun Verma', '1987-04-11', 'Male', 'I9012345', 'arjun@email.com', '9876543218'],
+    [10, 'Meera Joshi', '1996-08-05', 'Female', 'J0123456', 'meera@email.com', '9876543219'],
   ];
+  await initConn.query(
+    'INSERT INTO Passenger (Passenger_ID, Name, DOB, Gender, Passport_Number, Email, Contact_Number) VALUES ?',
+    [passengers]
+  );
+
+  // ── 5. Insert Flights (10) ──
   console.log('✈️  Inserting flights...');
-  await Flight.insertMany(flights);
-
-  // ── FLIGHT SCHEDULES (dynamic — every flight for next 30 days) ──
-  const flightTemplates = [
-    { Flight_ID: 101, Depart_Time: '06:00', Arrival_Time: '08:15', Seats: 120, Delay: 0 },
-    { Flight_ID: 102, Depart_Time: '09:30', Arrival_Time: '11:00', Seats: 80, Delay: 15 },
-    { Flight_ID: 103, Depart_Time: '14:00', Arrival_Time: '16:30', Seats: 150, Delay: 0 },
-    { Flight_ID: 104, Depart_Time: '07:45', Arrival_Time: '10:00', Seats: 60, Delay: 30 },
-    { Flight_ID: 105, Depart_Time: '18:00', Arrival_Time: '21:00', Seats: 45, Delay: 0 },
-    { Flight_ID: 106, Depart_Time: '11:15', Arrival_Time: '12:30', Seats: 90, Delay: 10 },
-    { Flight_ID: 107, Depart_Time: '20:00', Arrival_Time: '22:00', Seats: 55, Delay: 0 },
-    { Flight_ID: 108, Depart_Time: '05:30', Arrival_Time: '07:45', Seats: 100, Delay: 45 },
-    { Flight_ID: 109, Depart_Time: '16:30', Arrival_Time: '18:45', Seats: 70, Delay: 0 },
-    { Flight_ID: 110, Depart_Time: '12:00', Arrival_Time: '14:10', Seats: 130, Delay: 20 },
+  const flights = [
+    [101, 'AI-101', 'Air India', 'Delhi', 'Mumbai', 5500],
+    [102, 'SG-202', 'SpiceJet', 'Mumbai', 'Bangalore', 4200],
+    [103, '6E-303', 'IndiGo', 'Delhi', 'Chennai', 6000],
+    [104, 'UK-404', 'Vistara', 'Kolkata', 'Delhi', 5800],
+    [105, 'AI-505', 'Air India', 'Bangalore', 'Delhi', 6500],
+    [106, 'SG-606', 'SpiceJet', 'Chennai', 'Hyderabad', 3800],
+    [107, '6E-707', 'IndiGo', 'Hyderabad', 'Mumbai', 4500],
+    [108, 'UK-808', 'Vistara', 'Delhi', 'Kolkata', 5200],
+    [109, 'G8-909', 'GoAir', 'Pune', 'Delhi', 4800],
+    [110, 'AI-110', 'Air India', 'Mumbai', 'Delhi', 5600],
   ];
-  const schedules: any[] = [];
+  await initConn.query(
+    'INSERT INTO Flight (Flight_ID, Flight_Number, Airline_Name, Source, Destination, Base_Price) VALUES ?',
+    [flights]
+  );
+
+  // ── 6. Insert Flight Schedules (30 days × 10 flights = 300) ──
+  const flightTemplates = [
+    { Flight_ID: 101, Depart_Time: '06:00:00', Arrival_Time: '08:15:00', Seats: 120, Delay: 0 },
+    { Flight_ID: 102, Depart_Time: '09:30:00', Arrival_Time: '11:00:00', Seats: 80, Delay: 15 },
+    { Flight_ID: 103, Depart_Time: '14:00:00', Arrival_Time: '16:30:00', Seats: 150, Delay: 0 },
+    { Flight_ID: 104, Depart_Time: '07:45:00', Arrival_Time: '10:00:00', Seats: 60, Delay: 30 },
+    { Flight_ID: 105, Depart_Time: '18:00:00', Arrival_Time: '21:00:00', Seats: 45, Delay: 0 },
+    { Flight_ID: 106, Depart_Time: '11:15:00', Arrival_Time: '12:30:00', Seats: 90, Delay: 10 },
+    { Flight_ID: 107, Depart_Time: '20:00:00', Arrival_Time: '22:00:00', Seats: 55, Delay: 0 },
+    { Flight_ID: 108, Depart_Time: '05:30:00', Arrival_Time: '07:45:00', Seats: 100, Delay: 45 },
+    { Flight_ID: 109, Depart_Time: '16:30:00', Arrival_Time: '18:45:00', Seats: 70, Delay: 0 },
+    { Flight_ID: 110, Depart_Time: '12:00:00', Arrival_Time: '14:10:00', Seats: 130, Delay: 20 },
+  ];
+
+  const schedules: any[][] = [];
   let schedId = 1001;
   for (let day = 0; day < 30; day++) {
-    const d = new Date(); d.setDate(d.getDate() + day);
+    const d = new Date();
+    d.setDate(d.getDate() + day);
     const dateStr = d.toISOString().split('T')[0];
     for (const t of flightTemplates) {
-      schedules.push({
-        Schedule_ID: schedId++,
-        Flight_ID: t.Flight_ID,
-        Depart_Time: t.Depart_Time,
-        Arrival_Time: t.Arrival_Time,
-        Travel_Date: dateStr,
-        Available_Seats: t.Seats,
-        Delay_Minutes: t.Delay,
-      });
+      schedules.push([schedId++, t.Flight_ID, t.Depart_Time, t.Arrival_Time, dateStr, t.Seats, t.Delay]);
     }
   }
   console.log(`📅 Inserting ${schedules.length} flight schedules (30 days)...`);
-  await FlightSchedule.insertMany(schedules);
+  // Insert in batches of 50 to avoid query size limits
+  for (let i = 0; i < schedules.length; i += 50) {
+    const batch = schedules.slice(i, i + 50);
+    await initConn.query(
+      'INSERT INTO Flight_Schedule (Schedule_ID, Flight_ID, Depart_Time, Arrival_Time, Travel_Date, Available_Seats, Delay_Minutes) VALUES ?',
+      [batch]
+    );
+  }
 
-  // ── RESERVATIONS (10) ──
-  const reservations = [
-    { Res_ID: 2001, Passenger_ID: 1, Res_Date: '2026-04-25', Res_Status: 'Confirmed', Total_Amount: 5500 },
-    { Res_ID: 2002, Passenger_ID: 2, Res_Date: '2026-04-25', Res_Status: 'Confirmed', Total_Amount: 4200 },
-    { Res_ID: 2003, Passenger_ID: 3, Res_Date: '2026-04-26', Res_Status: 'Pending', Total_Amount: 6000 },
-    { Res_ID: 2004, Passenger_ID: 4, Res_Date: '2026-04-26', Res_Status: 'Confirmed', Total_Amount: 5800 },
-    { Res_ID: 2005, Passenger_ID: 5, Res_Date: '2026-04-27', Res_Status: 'Cancelled', Total_Amount: 6500 },
-    { Res_ID: 2006, Passenger_ID: 6, Res_Date: '2026-04-27', Res_Status: 'Confirmed', Total_Amount: 3800 },
-    { Res_ID: 2007, Passenger_ID: 7, Res_Date: '2026-04-28', Res_Status: 'Confirmed', Total_Amount: 4500 },
-    { Res_ID: 2008, Passenger_ID: 8, Res_Date: '2026-04-28', Res_Status: 'Confirmed', Total_Amount: 5200 },
-    { Res_ID: 2009, Passenger_ID: 9, Res_Date: '2026-04-29', Res_Status: 'Pending', Total_Amount: 4800 },
-    { Res_ID: 2010, Passenger_ID: 10, Res_Date: '2026-04-29', Res_Status: 'Confirmed', Total_Amount: 5600 },
-  ];
+  // ── 7. Insert Reservations (10) ──
   console.log('📝 Inserting reservations...');
-  await Reservation.insertMany(reservations);
-
-  // ── TICKETS (10) ──
-  const tickets = [
-    { Ticket_ID: 3001, Res_ID: 2001, Schedule_ID: 1001, Seat_Num: '12A', Class_Type: 'Economy', Price: 5500, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3002, Res_ID: 2002, Schedule_ID: 1002, Seat_Num: '1A', Class_Type: 'Business', Price: 4200, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3003, Res_ID: 2003, Schedule_ID: 1003, Seat_Num: '15C', Class_Type: 'Economy', Price: 6000, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3004, Res_ID: 2004, Schedule_ID: 1004, Seat_Num: '3B', Class_Type: 'First', Price: 5800, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3005, Res_ID: 2005, Schedule_ID: 1005, Seat_Num: '8A', Class_Type: 'Economy', Price: 6500, Ticket_Status: 'Cancelled' },
-    { Ticket_ID: 3006, Res_ID: 2006, Schedule_ID: 1006, Seat_Num: '22D', Class_Type: 'Economy', Price: 3800, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3007, Res_ID: 2007, Schedule_ID: 1007, Seat_Num: '5A', Class_Type: 'Business', Price: 4500, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3008, Res_ID: 2008, Schedule_ID: 1008, Seat_Num: '10B', Class_Type: 'Economy', Price: 5200, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3009, Res_ID: 2009, Schedule_ID: 1009, Seat_Num: '18C', Class_Type: 'Economy', Price: 4800, Ticket_Status: 'Booked' },
-    { Ticket_ID: 3010, Res_ID: 2010, Schedule_ID: 1010, Seat_Num: '7A', Class_Type: 'First', Price: 5600, Ticket_Status: 'Booked' },
+  const reservations = [
+    [2001, 1, '2026-04-25', 'Confirmed', 5500],
+    [2002, 2, '2026-04-25', 'Confirmed', 4200],
+    [2003, 3, '2026-04-26', 'Pending', 6000],
+    [2004, 4, '2026-04-26', 'Confirmed', 5800],
+    [2005, 5, '2026-04-27', 'Cancelled', 6500],
+    [2006, 6, '2026-04-27', 'Confirmed', 3800],
+    [2007, 7, '2026-04-28', 'Confirmed', 4500],
+    [2008, 8, '2026-04-28', 'Confirmed', 5200],
+    [2009, 9, '2026-04-29', 'Pending', 4800],
+    [2010, 10, '2026-04-29', 'Confirmed', 5600],
   ];
+  await initConn.query(
+    'INSERT INTO Reservation (Res_ID, Passenger_ID, Res_Date, Res_Status, Total_Amount) VALUES ?',
+    [reservations]
+  );
+
+  // ── 8. Insert Tickets (10) ──
   console.log('🎫 Inserting tickets...');
-  await Ticket.insertMany(tickets);
-
-  // ── PAYMENTS (10) ──
-  const payments = [
-    { Pay_ID: 4001, Res_ID: 2001, Amount: 5500, Pay_Date: '2026-04-25', Pay_Mode: 'UPI', Pay_Status: 'Success' },
-    { Pay_ID: 4002, Res_ID: 2002, Amount: 4200, Pay_Date: '2026-04-25', Pay_Mode: 'Credit Card', Pay_Status: 'Success' },
-    { Pay_ID: 4003, Res_ID: 2003, Amount: 6000, Pay_Date: '2026-04-26', Pay_Mode: 'Net Banking', Pay_Status: 'Pending' },
-    { Pay_ID: 4004, Res_ID: 2004, Amount: 5800, Pay_Date: '2026-04-26', Pay_Mode: 'Debit Card', Pay_Status: 'Success' },
-    { Pay_ID: 4005, Res_ID: 2005, Amount: 6500, Pay_Date: '2026-04-27', Pay_Mode: 'UPI', Pay_Status: 'Failed' },
-    { Pay_ID: 4006, Res_ID: 2006, Amount: 3800, Pay_Date: '2026-04-27', Pay_Mode: 'UPI', Pay_Status: 'Success' },
-    { Pay_ID: 4007, Res_ID: 2007, Amount: 4500, Pay_Date: '2026-04-28', Pay_Mode: 'Credit Card', Pay_Status: 'Success' },
-    { Pay_ID: 4008, Res_ID: 2008, Amount: 5200, Pay_Date: '2026-04-28', Pay_Mode: 'Debit Card', Pay_Status: 'Success' },
-    { Pay_ID: 4009, Res_ID: 2009, Amount: 4800, Pay_Date: '2026-04-29', Pay_Mode: 'Net Banking', Pay_Status: 'Pending' },
-    { Pay_ID: 4010, Res_ID: 2010, Amount: 5600, Pay_Date: '2026-04-29', Pay_Mode: 'UPI', Pay_Status: 'Success' },
+  const tickets = [
+    [3001, 2001, 1001, '12A', 'Economy', 5500, 'Booked'],
+    [3002, 2002, 1002, '1A', 'Business', 4200, 'Booked'],
+    [3003, 2003, 1003, '15C', 'Economy', 6000, 'Booked'],
+    [3004, 2004, 1004, '3B', 'First', 5800, 'Booked'],
+    [3005, 2005, 1005, '8A', 'Economy', 6500, 'Cancelled'],
+    [3006, 2006, 1006, '22D', 'Economy', 3800, 'Booked'],
+    [3007, 2007, 1007, '5A', 'Business', 4500, 'Booked'],
+    [3008, 2008, 1008, '10B', 'Economy', 5200, 'Booked'],
+    [3009, 2009, 1009, '18C', 'Economy', 4800, 'Booked'],
+    [3010, 2010, 1010, '7A', 'First', 5600, 'Booked'],
   ];
-  console.log('💳 Inserting payments...');
-  await Payment.insertMany(payments);
+  await initConn.query(
+    'INSERT INTO Ticket (Ticket_ID, Res_ID, Schedule_ID, Seat_Num, Class_Type, Price, Ticket_Status) VALUES ?',
+    [tickets]
+  );
 
-  console.log('✅ Seed complete! All 6 tables populated with 10 records each.');
-  await mongoose.disconnect();
+  // ── 9. Insert Payments (10) ──
+  console.log('💳 Inserting payments...');
+  const payments = [
+    [4001, 2001, 5500, '2026-04-25', 'UPI', 'Success'],
+    [4002, 2002, 4200, '2026-04-25', 'Credit Card', 'Success'],
+    [4003, 2003, 6000, '2026-04-26', 'Net Banking', 'Pending'],
+    [4004, 2004, 5800, '2026-04-26', 'Debit Card', 'Success'],
+    [4005, 2005, 6500, '2026-04-27', 'UPI', 'Failed'],
+    [4006, 2006, 3800, '2026-04-27', 'UPI', 'Success'],
+    [4007, 2007, 4500, '2026-04-28', 'Credit Card', 'Success'],
+    [4008, 2008, 5200, '2026-04-28', 'Debit Card', 'Success'],
+    [4009, 2009, 4800, '2026-04-29', 'Net Banking', 'Pending'],
+    [4010, 2010, 5600, '2026-04-29', 'UPI', 'Success'],
+  ];
+  await initConn.query(
+    'INSERT INTO Payment (Pay_ID, Res_ID, Amount, Pay_Date, Pay_Mode, Pay_Status) VALUES ?',
+    [payments]
+  );
+
+  console.log('\n✅ Seed complete! All 6 tables populated:');
+  console.log('   • 10 Passengers');
+  console.log('   • 10 Flights');
+  console.log(`   • ${schedules.length} Flight Schedules (30 days × 10 flights)`);
+  console.log('   • 10 Reservations');
+  console.log('   • 10 Tickets');
+  console.log('   • 10 Payments');
+
+  await initConn.end();
 }
 
 seed().catch((err) => {
-  console.error('Seed failed:', err);
+  console.error('❌ Seed failed:', err);
   process.exit(1);
 });
