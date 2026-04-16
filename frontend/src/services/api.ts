@@ -30,6 +30,7 @@ export const api = {
 
   // Payment
   createPaymentIntent: (data: any) => request('/payments/create-intent', { method: 'POST', body: JSON.stringify(data) }),
+  createCheckoutSession: (data: any) => request('/payments/create-checkout-session', { method: 'POST', body: JSON.stringify(data) }),
   confirmPayment: (data: any) => request('/payments/confirm', { method: 'POST', body: JSON.stringify(data) }),
 
   // Queries

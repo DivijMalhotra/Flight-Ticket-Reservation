@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '@/services/api';
 import { motion } from 'framer-motion';
+import PageHero from '@/components/PageHero';
 import { Database, Play, Terminal, AlertTriangle } from 'lucide-react';
 
 interface QueryDef {
@@ -20,6 +21,13 @@ const QUERIES: QueryDef[] = [
   { id: 'q7', name: 'Delhi Travelers + Date', description: 'Names & dates for Delhi', run: api.passengerTravelDelhi },
   { id: 'q8', name: 'Successful Payments', description: 'Status = Success', run: api.successfulPayments },
 ];
+
+const fadeUp = {
+  initial: { opacity: 0, y: 20 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true },
+  transition: { duration: 0.5 },
+};
 
 const QueriesPage: React.FC = () => {
   const [activeQuery, setActiveQuery] = useState<string | null>(null);
@@ -59,7 +67,7 @@ const QueriesPage: React.FC = () => {
 
       const keys = Object.keys(dataArray[0]).filter(k => !['_id', '__v', 'createdAt', 'updatedAt'].includes(k));
       return (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mt-8">
+        <motion.div {...fadeUp} className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-white flex items-center gap-2">
               <Terminal size={16} className="text-brand-500" /> Query Results
@@ -100,7 +108,7 @@ const QueriesPage: React.FC = () => {
     // Aggregation result
     const keys = Object.keys(data).filter(k => !['_id', '__v', 'createdAt', 'updatedAt'].includes(k));
     return (
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mt-8">
+      <motion.div {...fadeUp} className="mt-8">
         <h3 className="text-base font-semibold text-white flex items-center gap-2 mb-4">
           <Database size={16} className="text-brand-500" /> Aggregation Result
         </h3>
@@ -121,40 +129,44 @@ const QueriesPage: React.FC = () => {
   };
 
   return (
-    <div className="container-app page-section">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-3 mb-1">
-          <Database size={24} className="text-brand-500" /> SQL Queries
-        </h1>
-        <p className="text-sm text-gray-500 mb-8">Run predefined queries (relational algebra equivalents) against MongoDB</p>
+    <>
+      <PageHero
+        icon={Database}
+        title="SQL Queries"
+        subtitle="Run predefined queries (relational algebra equivalents) against MySQL"
+        badge="8 pre-built queries"
+      />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          {QUERIES.map(q => (
-            <button
-              key={q.id}
-              onClick={() => runQuery(q)}
-              className={`text-left p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3 ${
-                activeQuery === q.id
-                  ? 'border-brand-500 bg-brand-500/5 shadow-lg shadow-brand-500/5'
-                  : 'border-border bg-surface-card hover:border-brand-500/40 hover:bg-surface-card-hover'
-              }`}
-              id={`query-${q.id}`}
-            >
-              <div className="w-9 h-9 rounded-lg bg-brand-500/10 flex items-center justify-center flex-shrink-0">
-                <Play size={14} className="text-brand-500" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-white">{q.name}</p>
-                <p className="text-[0.7rem] text-gray-500 mt-0.5">{q.description}</p>
-              </div>
-            </button>
-          ))}
-        </div>
+      <div className="container-app -mt-6 relative z-10 pb-12">
+        <motion.div {...fadeUp}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            {QUERIES.map(q => (
+              <button
+                key={q.id}
+                onClick={() => runQuery(q)}
+                className={`text-left p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3 ${
+                  activeQuery === q.id
+                    ? 'border-brand-500 bg-brand-500/5 shadow-lg shadow-brand-500/5'
+                    : 'border-border bg-surface-card hover:border-brand-500/40 hover:bg-surface-card-hover'
+                }`}
+                id={`query-${q.id}`}
+              >
+                <div className="w-9 h-9 rounded-lg bg-brand-500/10 flex items-center justify-center flex-shrink-0">
+                  <Play size={14} className="text-brand-500" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">{q.name}</p>
+                  <p className="text-[0.7rem] text-gray-500 mt-0.5">{q.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
 
-        {loading && <div className="flex justify-center py-12"><div className="spinner" /></div>}
-        {!loading && data && renderData()}
-      </motion.div>
-    </div>
+          {loading && <div className="flex justify-center py-12"><div className="spinner" /></div>}
+          {!loading && data && renderData()}
+        </motion.div>
+      </div>
+    </>
   );
 };
 

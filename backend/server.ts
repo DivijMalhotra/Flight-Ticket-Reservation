@@ -23,6 +23,10 @@ async function startServer() {
 
   // Middleware
   app.use(cors({ origin: CLIENT_URL, credentials: true }));
+
+  // Stripe webhook needs the raw body for signature verification — register BEFORE express.json()
+  app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
   app.use(express.json());
 
   // Routes
